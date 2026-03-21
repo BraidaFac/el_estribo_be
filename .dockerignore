@@ -1,0 +1,29 @@
+# Dependencias y artefactos locales (se instalan/compilan en la imagen)
+node_modules
+dist
+coverage
+
+# Git y editor
+.git
+.gitignore
+.vscode
+.idea
+
+# Entorno y secretos (nunca en la imagen; pasar PORT/DB por runtime)
+.env
+.env.*
+!.env.example
+
+# Tests y documentación no necesarios en runtime
+test
+**/*.spec.ts
+*.md
+
+# Logs y cachés
+npm-debug.log*
+yarn-error.log*
+.eslintcache
+
+# Docker (evitar invalidar capas innecesariamente)
+Dockerfile*
+.dockerignore

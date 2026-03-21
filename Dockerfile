@@ -1,29 +1,37 @@
-# ---- BUILD STAGE ----
+# syntax=docker/dockerfile:1
+# Multi-stage: una sola `npm ci`, build y prune → imagen final sin devDependencies.
+
+# ---------- build ----------
 FROM node:22-alpine AS build
 
 WORKDIR /app
 
-COPY package*.json ./
+# Capa cacheable: solo manifiestos
+COPY package.json package-lock.json ./
 
 RUN npm ci
 
 COPY . .
 
-RUN npm run build
+# No establecer NODE_ENV=production antes del build: hace falta @nestjs/cli (devDependency).
+RUN npm run build && npm prune --omit=dev
 
-# ---- PRODUCTION STAGE ----
+# ---------- production ----------
 FROM node:22-alpine AS production
 
 WORKDIR /app
 
-COPY package*.json ./
+ENV NODE_ENV=production
+# Alineado con main.ts (listen(process.env.PORT)); sobrescribible en compose/k8s
+ENV PORT=3000
 
-# Instala solo dependencias de producción
-RUN npm ci --omit=dev
+# Solo runtime: módulos ya podados + JS compilado
+COPY --from=build --chown=node:node /app/node_modules ./node_modules
+COPY --from=build --chown=node:node /app/dist ./dist
 
-# Copia el build ya generado
-COPY --from=build /app/dist ./dist
+USER node
 
 EXPOSE 3000
 
-CMD ["npm", "run", "start:prod"]
+# Invocación directa a Node (sin shell de npm)
+CMD ["node", "dist/main.js"]

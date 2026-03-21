@@ -2,9 +2,17 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigType } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from './auth/auth.module';
-import { BookingModule } from './booking/booking.module';
+import { BloqueosModule } from './modules/bloqueos/bloqueos.module';
+import { CalendarioLaboralModule } from './modules/calendario-laboral/calendario-laboral.module';
+import { ConfiguracionGeneralModule } from './modules/configuracion-general/configuracion-general.module';
+import { LavanderiasModule } from './modules/lavanderias/lavanderias.module';
+import { ModistasModule } from './modules/modistas/modistas.module';
+import { OperacionesPrendaModule } from './modules/operaciones-prenda/operaciones-prenda.module';
+import { PantalonesModule } from './modules/pantalones/pantalones.module';
+import { ReservasModule } from './modules/reservas/reservas.module';
+import { SacosModule } from './modules/sacos/sacos.module';
+import { TareasOperativasModule } from './modules/tareas-operativas/tareas-operativas.module';
 import databaseConfig from './config/database.config';
-import { SuitModule } from './suit/suit.module';
 import { UserModule } from './user/user.module';
 
 @Module({
@@ -25,8 +33,16 @@ import { UserModule } from './user/user.module';
         synchronize: db.synchronize,
       }),
     }),
-    SuitModule,
-    BookingModule,
+    SacosModule,
+    PantalonesModule,
+    ReservasModule,
+    BloqueosModule,
+    CalendarioLaboralModule,
+    ConfiguracionGeneralModule,
+    LavanderiasModule,
+    ModistasModule,
+    OperacionesPrendaModule,
+    TareasOperativasModule,
     AuthModule,
     UserModule,
   ],

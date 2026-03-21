@@ -1,0 +1,72 @@
+export enum TipoPrenda {
+  SACO = 'SACO',
+  PANTALON = 'PANTALON',
+}
+
+export enum CondicionPrenda {
+  LIMPIA = 'LIMPIA',
+  SUCIA = 'SUCIA',
+  REQUIERE_REVISION = 'REQUIERE_REVISION',
+}
+
+export enum EstadoReserva {
+  PENDIENTE = 'PENDIENTE',
+  CONFIRMADA = 'CONFIRMADA',
+  EN_CURSO = 'EN_CURSO',
+  COMPLETADA = 'COMPLETADA',
+  CANCELADA = 'CANCELADA',
+}
+
+export enum EstadoUbicacionPrenda {
+  TIENDA = 'TIENDA',
+  EN_MODISTA = 'EN_MODISTA',
+  EN_LAVANDERIA = 'EN_LAVANDERIA',
+  RETIRADO_CLIENTE = 'RETIRADO_CLIENTE',
+}
+
+export enum TipoBloqueo {
+  MEDICION = 'MEDICION',
+  RESERVA = 'RESERVA',
+  MODISTA = 'MODISTA',
+  LISTO_TIENDA = 'LISTO_TIENDA',
+  LAVANDERIA = 'LAVANDERIA',
+  MANTENIMIENTO = 'MANTENIMIENTO',
+  MANUAL = 'MANUAL',
+}
+
+export enum OrigenBloqueo {
+  AUTOMATICO = 'AUTOMATICO',
+  MANUAL = 'MANUAL',
+}
+
+export enum EstadoBloqueo {
+  ACTIVO = 'ACTIVO',
+  CANCELADO = 'CANCELADO',
+}
+
+export enum TipoTareaOperativa {
+  LLEVAR_LAVANDERIA = 'LLEVAR_LAVANDERIA',
+  LLEVAR_MODISTA = 'LLEVAR_MODISTA',
+  CONTACTAR_MEDICION = 'CONTACTAR_MEDICION',
+}
+
+export enum EstadoTareaOperativa {
+  PENDIENTE = 'PENDIENTE',
+  EN_PROCESO = 'EN_PROCESO',
+  COMPLETADA = 'COMPLETADA',
+  CANCELADA = 'CANCELADA',
+}
+
+export enum PrioridadTareaOperativa {
+  ALTA = 'ALTA',
+  MEDIA = 'MEDIA',
+  BAJA = 'BAJA',
+}
+
+export enum EstadoAgendaMedicion {
+  PROGRAMADA = 'PROGRAMADA',
+  ASISTIO = 'ASISTIO',
+  NO_ASISTIO = 'NO_ASISTIO',
+  REPROGRAMADA = 'REPROGRAMADA',
+  CANCELADA = 'CANCELADA',
+}
