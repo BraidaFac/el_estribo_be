@@ -7,11 +7,15 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { subDays } from 'date-fns';
 import { BloqueoPrendaEvento } from 'src/modules/bloqueos/entity/bloqueo-prenda-evento.entity';
 import { BloqueoPrenda } from 'src/modules/bloqueos/entity/bloqueo-prenda.entity';
-import { BloqueoPlannerService } from 'src/modules/bloqueos/service/bloqueo-planner.service';
+import {
+  BloqueoPlannerService,
+  RangoPlanificado,
+} from 'src/modules/bloqueos/service/bloqueo-planner.service';
 import {
   EstadoBloqueo,
   EstadoReserva,
   EstadoUbicacionPrenda,
+  TipoBloqueo,
   TipoPrenda,
 } from 'src/modules/common/enums/reservas-domain.enums';
 import { ConfiguracionGeneralService } from 'src/modules/configuracion-general/service/configuracion-general.service';
@@ -451,6 +455,7 @@ export class ReservasV2Service {
         normalized,
       );
       if (!bloqueado) {
+        console.log('pantalon no bloqueado', pantalon.id, normalized);
         resultado.push(pantalon);
       }
     }
@@ -471,6 +476,7 @@ export class ReservasV2Service {
       args.fechaReserva,
       args.requiereModista,
     );
+    this.assertVentanaBloqueosRespetanHoy(rangos);
     const rangosConsulta = rangos.map((rango) => ({
       inicio: rango.inicio,
       fin: rango.fin,
@@ -828,5 +834,36 @@ export class ReservasV2Service {
         'No se pueden crear reservas en fechas anteriores al dia de hoy',
       );
     }
+  }
+
+  /**
+   * Rechaza la reserva si algún bloqueo tentativo (misma lógica que el planner)
+   * caería antes del día actual. Los rangos ya usan días hábiles (sin domingos ni feriados).
+   */
+  private assertVentanaBloqueosRespetanHoy(rangos: RangoPlanificado[]): void {
+    const hoy = DateUtils.getTodayDateOnly();
+    for (const rango of rangos) {
+      const earliest = rango.inicio <= rango.fin ? rango.inicio : rango.fin;
+      if (earliest < hoy) {
+        throw new BadRequestException(
+          `La fecha de reserva no es factible: el bloqueo de ${this.labelTipoBloqueoPlano(
+            rango.tipoBloqueo,
+          )} requeriria fechas anteriores al dia de hoy (${hoy}).`,
+        );
+      }
+    }
+  }
+
+  private labelTipoBloqueoPlano(tipo: TipoBloqueo): string {
+    const map: Record<TipoBloqueo, string> = {
+      [TipoBloqueo.MEDICION]: 'medición',
+      [TipoBloqueo.MODISTA]: 'modista',
+      [TipoBloqueo.LISTO_TIENDA]: 'listo en tienda',
+      [TipoBloqueo.RESERVA]: 'reserva',
+      [TipoBloqueo.LAVANDERIA]: 'lavandería',
+      [TipoBloqueo.MANTENIMIENTO]: 'mantenimiento',
+      [TipoBloqueo.MANUAL]: 'manual',
+    };
+    return map[tipo] ?? tipo;
   }
 }

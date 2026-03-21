@@ -1,11 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { BloqueoPrenda } from 'src/modules/bloqueos/entity/bloqueo-prenda.entity';
 import {
   EstadoBloqueo,
   TipoPrenda,
 } from 'src/modules/common/enums/reservas-domain.enums';
 import { EntityManager, Repository } from 'typeorm';
-import { BloqueoPrenda } from 'src/modules/bloqueos/entity/bloqueo-prenda.entity';
 
 export type RangoConsulta = {
   inicio: string;
@@ -47,7 +47,6 @@ export class DisponibilidadService {
     if (rangos.length === 0) {
       return false;
     }
-
     const repo = options?.manager
       ? options.manager.getRepository(BloqueoPrenda)
       : this.bloqueoRepository;
