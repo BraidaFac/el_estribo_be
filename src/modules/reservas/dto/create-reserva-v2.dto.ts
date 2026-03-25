@@ -40,4 +40,8 @@ export class CreateReservaV2Dto {
   @IsOptional()
   @IsBoolean()
   requiereModista?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  reservaUltimoMomento?: boolean;
 }

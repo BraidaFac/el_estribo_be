@@ -14,4 +14,9 @@ export class ValidarReservaV2Dto {
   @IsOptional()
   @IsBoolean()
   requiereModista?: boolean;
+
+  /** Recorta bloqueos previos (medición/modista/listo) desde hoy; la lavandería posterior sigue el plan completo. */
+  @IsOptional()
+  @IsBoolean()
+  reservaUltimoMomento?: boolean;
 }

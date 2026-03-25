@@ -39,6 +39,11 @@ export class ReservasV2Controller {
     );
   }
 
+  @Get('dashboard-operativo')
+  dashboardOperativo() {
+    return this.reservasV2Service.dashboardOperativo();
+  }
+
   @Get('disponibilidad/sacos/:sacoId')
   disponibilidadSaco(
     @Param('sacoId', ParseIntPipe) sacoId: number,

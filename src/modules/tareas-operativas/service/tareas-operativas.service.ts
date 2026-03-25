@@ -59,6 +59,7 @@ export class TareasOperativasService {
     tipoTarea?: TipoTareaOperativa;
     estado?: EstadoTareaOperativa;
     prioridad?: PrioridadTareaOperativa;
+    reservaIds?: number[];
   }): Promise<TareaOperativa[]> {
     await this.asegurarTareasContactoMedicion();
 
@@ -84,6 +85,12 @@ export class TareasOperativasService {
       });
     }
 
+    if (params?.reservaIds?.length) {
+      qb.andWhere('reserva.id IN (:...reservaIds)', {
+        reservaIds: params.reservaIds,
+      });
+    }
+
     if (params?.tipoTarea === TipoTareaOperativa.CONTACTAR_MEDICION) {
       qb.andWhere(
         'tarea.estado != :estadoCompletada AND tarea.estado != :estadoCancelada',
@@ -101,6 +108,53 @@ export class TareasOperativasService {
       ELSE 3 END`,
       'ASC',
     )
+      .addOrderBy('tarea.fechaObjetivoDesde', 'ASC')
+      .addOrderBy('tarea.createdAt', 'ASC');
+
+    const tareas = await qb.getMany();
+
+    await this.adjuntarAsignacionesServicioEnTareas(tareas);
+    return tareas;
+  }
+
+  /**
+   * Tareas operativas abiertas: lavandería/modista (pendiente o en proceso) y
+   * contactar medición (excluye completadas/canceladas).
+   */
+  async listarTareasPendientesParaDashboard(): Promise<TareaOperativa[]> {
+    await this.asegurarTareasContactoMedicion();
+
+    const qb = this.tareaRepository
+      .createQueryBuilder('tarea')
+      .leftJoinAndSelect('tarea.reserva', 'reserva')
+      .leftJoinAndSelect('reserva.pantalon', 'reservaPantalon')
+      .leftJoinAndSelect('tarea.saco', 'saco')
+      .leftJoinAndSelect('tarea.pantalon', 'pantalon')
+      .where(
+        '(tarea.tipoTarea IN (:...tiposLlevar) AND tarea.estado IN (:...estadosLlevar)) OR (tarea.tipoTarea = :contactar AND tarea.estado NOT IN (:...cerrados))',
+        {
+          tiposLlevar: [
+            TipoTareaOperativa.LLEVAR_LAVANDERIA,
+            TipoTareaOperativa.LLEVAR_MODISTA,
+          ],
+          estadosLlevar: [
+            EstadoTareaOperativa.PENDIENTE,
+            EstadoTareaOperativa.EN_PROCESO,
+          ],
+          contactar: TipoTareaOperativa.CONTACTAR_MEDICION,
+          cerrados: [
+            EstadoTareaOperativa.COMPLETADA,
+            EstadoTareaOperativa.CANCELADA,
+          ],
+        },
+      )
+      .orderBy(
+        `CASE tarea.prioridad
+      WHEN '${PrioridadTareaOperativa.ALTA}' THEN 1
+      WHEN '${PrioridadTareaOperativa.MEDIA}' THEN 2
+      ELSE 3 END`,
+        'ASC',
+      )
       .addOrderBy('tarea.fechaObjetivoDesde', 'ASC')
       .addOrderBy('tarea.createdAt', 'ASC');
 
@@ -512,7 +566,11 @@ export class TareasOperativasService {
       if (Number.isNaN(fechaCita.getTime())) {
         throw new BadRequestException('fechaHoraCita invalida');
       }
-      if (tarea.fechaObjetivoDesde && tarea.fechaObjetivoHasta) {
+      if (
+        !dto.noValidarFecha &&
+        tarea.fechaObjetivoDesde &&
+        tarea.fechaObjetivoHasta
+      ) {
         const citaKey = DateUtils.formatDateOnly(fechaCita);
         if (
           citaKey < tarea.fechaObjetivoDesde ||

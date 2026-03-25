@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { subDays } from 'date-fns';
+import { addDays, differenceInCalendarDays, parseISO, subDays } from 'date-fns';
 import { BloqueoPrendaEvento } from 'src/modules/bloqueos/entity/bloqueo-prenda-evento.entity';
 import { BloqueoPrenda } from 'src/modules/bloqueos/entity/bloqueo-prenda.entity';
 import {
@@ -14,9 +14,12 @@ import {
 import {
   EstadoBloqueo,
   EstadoReserva,
+  EstadoTareaOperativa,
   EstadoUbicacionPrenda,
+  PrioridadTareaOperativa,
   TipoBloqueo,
   TipoPrenda,
+  TipoTareaOperativa,
 } from 'src/modules/common/enums/reservas-domain.enums';
 import { ConfiguracionGeneralService } from 'src/modules/configuracion-general/service/configuracion-general.service';
 import { Lavanderia } from 'src/modules/lavanderias/entity/lavanderia.entity';
@@ -24,11 +27,18 @@ import { Modista } from 'src/modules/modistas/entity/modista.entity';
 import { OperacionesPrendaService } from 'src/modules/operaciones-prenda/service/operaciones-prenda.service';
 import { Pantalon } from 'src/modules/pantalones/entity/pantalon.entity';
 import { Saco } from 'src/modules/sacos/entity/saco.entity';
+import { TareaOperativa } from 'src/modules/tareas-operativas/entity/tarea-operativa.entity';
 import { TareasOperativasService } from 'src/modules/tareas-operativas/service/tareas-operativas.service';
 import { DateUtils } from 'src/utils/date_utils';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { ActualizarReservaV2Dto } from '../dto/actualizar-reserva-v2.dto';
 import { CreateReservaV2Dto } from '../dto/create-reserva-v2.dto';
+import {
+  DashboardCategoria,
+  DashboardItemDto,
+  DashboardOperativoResponse,
+  DashboardUrgencia,
+} from '../dto/dashboard-operativo.types';
 import { ValidarReservaV2Dto } from '../dto/validar-reserva-v2.dto';
 import { AsignacionServicioReserva } from '../entity/asignacion-servicio-reserva.entity';
 import { Reserva } from '../entity/reserva.entity';
@@ -100,6 +110,7 @@ export class ReservasV2Service {
       throw new BadRequestException('pantalonId invalido');
     }
     const requiereModista = input.requiereModista ?? true;
+    const reservaUltimoMomento = input.reservaUltimoMomento ?? false;
 
     await this.validarConflictosPreReserva(
       {
@@ -107,6 +118,7 @@ export class ReservasV2Service {
         pantalonId,
         fechaReserva,
         requiereModista,
+        reservaUltimoMomento,
       },
       undefined,
       false,
@@ -136,6 +148,7 @@ export class ReservasV2Service {
       throw new BadRequestException('pantalonId invalido');
     }
     const requiereModista = dto.requiereModista ?? true;
+    const reservaUltimoMomento = dto.reservaUltimoMomento ?? false;
 
     return this.dataSource.transaction(async (manager) => {
       await this.bloquearPrendaEnTransaccion(manager, TipoPrenda.SACO, sacoId);
@@ -153,6 +166,7 @@ export class ReservasV2Service {
           pantalonId,
           fechaReserva,
           requiereModista,
+          reservaUltimoMomento,
         },
         manager,
         true,
@@ -197,6 +211,7 @@ export class ReservasV2Service {
           lavanderiaId: null,
           requiereModista,
           creadoPor: userId ?? null,
+          reservaUltimoMomento,
         },
         manager,
       );
@@ -287,6 +302,159 @@ export class ReservasV2Service {
     );
   }
 
+  async dashboardOperativo(): Promise<DashboardOperativoResponse> {
+    const hoy = DateUtils.getTodayDateOnly();
+    const items: DashboardItemDto[] = [];
+    const porCategoria: Record<string, number> = {};
+
+    const bump = (cat: string) => {
+      porCategoria[cat] = (porCategoria[cat] ?? 0) + 1;
+    };
+
+    const planillaPorCategoria: Record<DashboardCategoria, string> = {
+      llevar_lavanderia: '/planillas/llevar',
+      retirar_lavanderia: '/planillas/devolver',
+      llevar_modista: '/planillas/llevar-modista',
+      retirar_modista: '/planillas/retirar-modista',
+      contactar_medicion: '/planillas/contactar-medicion',
+      retiro_cliente: '/planillas/retirar',
+      devolucion_cliente: '/planillas/retiros',
+      agenda_medicion: '/planillas/agenda-mediciones',
+    };
+
+    const tareas =
+      await this.tareasOperativasService.listarTareasPendientesParaDashboard();
+    for (const t of tareas) {
+      const mapped = this.mapTareaDashboard(t);
+      const fechaRef = this.fechaReferenciaTarea(t);
+      const urgencia = this.urgenciaDashboardDesdeFecha(fechaRef, hoy);
+      items.push({
+        id: `tarea-${t.id}`,
+        categoria: mapped.categoria,
+        titulo: mapped.titulo,
+        descripcion: mapped.descripcion,
+        fechaReferencia: fechaRef,
+        urgencia,
+        prioridad: t.prioridad,
+        planillaDestino: planillaPorCategoria[mapped.categoria],
+        tareaId: t.id,
+        reservaId: t.reserva?.id ?? null,
+        tarea: t,
+      });
+      bump(mapped.categoria);
+    }
+
+    const [confirmadas, enCurso] = await Promise.all([
+      this.reservaRepository.find({
+        where: { estadoReserva: EstadoReserva.CONFIRMADA },
+        relations: ['saco', 'pantalon'],
+      }),
+      this.reservaRepository.find({
+        where: { estadoReserva: EstadoReserva.EN_CURSO },
+        relations: ['saco', 'pantalon'],
+      }),
+    ]);
+    await this.adjuntarAsignacionesServicioAReservas([
+      ...confirmadas,
+      ...enCurso,
+    ]);
+
+    for (const r of confirmadas) {
+      const enriched = await this.enriquecerReserva(r);
+      if (!enriched.accionesPermitidas.retirar.permitida) {
+        continue;
+      }
+      const fechaRef =
+        DateUtils.normalizeDateOnly(enriched.fechaReserva) ??
+        enriched.fechaReserva;
+      items.push({
+        id: `retiro-${enriched.id}`,
+        categoria: 'retiro_cliente',
+        titulo: `Retiro en el local · ${enriched.clienteNombre}`,
+        descripcion: this.resumenPrendasReservaDashboard(enriched),
+        fechaReferencia: fechaRef,
+        urgencia: this.urgenciaDashboardDesdeFecha(fechaRef, hoy),
+        prioridad: null,
+        planillaDestino: planillaPorCategoria.retiro_cliente,
+        reservaId: enriched.id,
+        reserva: enriched,
+      });
+      bump('retiro_cliente');
+    }
+
+    for (const r of enCurso) {
+      const enriched = await this.enriquecerReserva(r);
+      if (!enriched.accionesPermitidas.devolver.permitida) {
+        continue;
+      }
+      const fechaRef =
+        DateUtils.normalizeDateOnly(enriched.fechaReserva) ??
+        enriched.fechaReserva;
+      items.push({
+        id: `devolucion-${enriched.id}`,
+        categoria: 'devolucion_cliente',
+        titulo: `Devolución al local · ${enriched.clienteNombre}`,
+        descripcion: this.resumenPrendasReservaDashboard(enriched),
+        fechaReferencia: fechaRef,
+        urgencia: this.urgenciaDashboardDesdeFecha(fechaRef, hoy),
+        prioridad: null,
+        planillaDestino: planillaPorCategoria.devolucion_cliente,
+        reservaId: enriched.id,
+        reserva: enriched,
+      });
+      bump('devolucion_cliente');
+    }
+
+    const hastaAgenda = addDays(parseISO(hoy), 90);
+    const agendaRows = await this.tareasOperativasService.listarAgenda(
+      hoy,
+      DateUtils.formatDateOnly(hastaAgenda),
+      undefined,
+    );
+    for (const a of agendaRows) {
+      const cita =
+        a.fechaHoraCita instanceof Date
+          ? a.fechaHoraCita
+          : new Date(a.fechaHoraCita as string);
+      const fechaRef = DateUtils.formatDateOnly(cita);
+      const cliente =
+        a.reserva?.clienteNombre ?? a.clienteNombreSnapshot ?? 'Cliente';
+      items.push({
+        id: `agenda-${a.id}`,
+        categoria: 'agenda_medicion',
+        titulo: `Cita medición · ${cliente}`,
+        descripcion: a.observaciones?.trim() || null,
+        fechaReferencia: fechaRef,
+        urgencia: this.urgenciaDashboardDesdeFecha(fechaRef, hoy),
+        prioridad: null,
+        planillaDestino: planillaPorCategoria.agenda_medicion,
+        agendaId: a.id,
+        reservaId: a.reserva?.id ?? null,
+        agenda: a,
+      });
+      bump('agenda_medicion');
+    }
+
+    this.ordenarItemsDashboard(items);
+
+    const hastaReservas7 = DateUtils.formatDateOnly(addDays(parseISO(hoy), 6));
+    const proximasReservas7Dias = (
+      await this.listarPorRango(hoy, hastaReservas7)
+    ).filter(
+      (r) =>
+        r.estadoReserva !== EstadoReserva.COMPLETADA &&
+        r.estadoReserva !== EstadoReserva.EN_CURSO,
+    );
+
+    return {
+      generadoEn: new Date().toISOString(),
+      resumen: this.resumenUrgenciasDashboard(items),
+      porCategoria,
+      items,
+      proximasReservas7Dias,
+    };
+  }
+
   async actualizarReserva(
     reservaId: number,
     dto: ActualizarReservaV2Dto,
@@ -327,7 +495,7 @@ export class ReservasV2Service {
   ): Promise<ReservaConAcciones> {
     return this.dataSource.transaction(async (manager) => {
       const reserva = await this.obtenerReserva(reservaId, manager);
-      this.assertPuedeRetirar(reserva);
+      await this.assertPuedeRetirar(reserva);
 
       reserva.estadoReserva = EstadoReserva.EN_CURSO;
       reserva.clienteRetiroAt = DateUtils.getTodayDateOnly();
@@ -468,25 +636,65 @@ export class ReservasV2Service {
       pantalonId: number | null;
       fechaReserva: string;
       requiereModista: boolean;
+      reservaUltimoMomento?: boolean;
     },
     manager?: EntityManager,
     lockForUpdate = false,
   ): Promise<void> {
-    const rangos = await this.bloqueoPlannerService.obtenerRangosPlanificados(
+    const ideal = await this.bloqueoPlannerService.obtenerRangosPlanificados(
       args.fechaReserva,
       args.requiereModista,
     );
-    this.assertVentanaBloqueosRespetanHoy(rangos);
-    const rangosConsulta = rangos.map((rango) => ({
-      inicio: rango.inicio,
-      fin: rango.fin,
-    }));
+
+    let rangos: RangoPlanificado[];
+
+    if (args.reservaUltimoMomento) {
+      rangos =
+        await this.bloqueoPlannerService.obtenerRangosPlanificadosUltimoMomento(
+          args.fechaReserva,
+          args.requiereModista,
+        );
+      this.assertVentanaBloqueosRespetanHoy(rangos);
+    } else {
+      rangos = ideal;
+      this.assertVentanaBloqueosRespetanHoy(rangos, {
+        puedeUltimoMomento: true,
+      });
+    }
+
+    const soloPosteriores = ideal
+      .filter((r) => r.tipoBloqueo === TipoBloqueo.LAVANDERIA)
+      .map((r) => ({ inicio: r.inicio, fin: r.fin }));
+
+    if (soloPosteriores.length > 0) {
+      const sacoPost =
+        await this.disponibilidadService.existeSolapamientoEnRangos(
+          TipoPrenda.SACO,
+          args.sacoId,
+          soloPosteriores,
+          { manager, lockForUpdate },
+        );
+      if (sacoPost) {
+        throw new BadRequestException({
+          message:
+            'Los bloqueos posteriores a la reserva (lavandería) chocan con otra reserva o bloqueo del saco. Elige otra fecha o libera días posteriores.',
+          codigo: 'CONFLICTO_BLOQUEOS_POSTERIORES',
+        });
+      }
+    }
+
+    const sinLavanderia = rangos
+      .filter((r) => r.tipoBloqueo !== TipoBloqueo.LAVANDERIA)
+      .map((rango) => ({
+        inicio: rango.inicio,
+        fin: rango.fin,
+      }));
 
     const sacoBloqueado =
       await this.disponibilidadService.existeSolapamientoEnRangos(
         TipoPrenda.SACO,
         args.sacoId,
-        rangosConsulta,
+        sinLavanderia,
         { manager, lockForUpdate },
       );
     if (sacoBloqueado) {
@@ -499,11 +707,28 @@ export class ReservasV2Service {
       return;
     }
 
+    if (soloPosteriores.length > 0) {
+      const pantPost =
+        await this.disponibilidadService.existeSolapamientoEnRangos(
+          TipoPrenda.PANTALON,
+          args.pantalonId,
+          soloPosteriores,
+          { manager, lockForUpdate },
+        );
+      if (pantPost) {
+        throw new BadRequestException({
+          message:
+            'Los bloqueos posteriores a la reserva (lavandería) chocan con otra reserva o bloqueo del pantalón. Elige otra fecha o libera días posteriores.',
+          codigo: 'CONFLICTO_BLOQUEOS_POSTERIORES',
+        });
+      }
+    }
+
     const pantalonBloqueado =
       await this.disponibilidadService.existeSolapamientoEnRangos(
         TipoPrenda.PANTALON,
         args.pantalonId,
-        rangosConsulta,
+        sinLavanderia,
         { manager, lockForUpdate },
       );
     if (pantalonBloqueado) {
@@ -840,16 +1065,18 @@ export class ReservasV2Service {
    * Rechaza la reserva si algún bloqueo tentativo (misma lógica que el planner)
    * caería antes del día actual. Los rangos ya usan días hábiles (sin domingos ni feriados).
    */
-  private assertVentanaBloqueosRespetanHoy(rangos: RangoPlanificado[]): void {
+  private assertVentanaBloqueosRespetanHoy(
+    rangos: RangoPlanificado[],
+    options?: { puedeUltimoMomento?: boolean },
+  ): void {
     const hoy = DateUtils.getTodayDateOnly();
     for (const rango of rangos) {
       const earliest = rango.inicio <= rango.fin ? rango.inicio : rango.fin;
       if (earliest < hoy) {
-        throw new BadRequestException(
-          `La fecha de reserva no es factible: el bloqueo de ${this.labelTipoBloqueoPlano(
-            rango.tipoBloqueo,
-          )} requeriria fechas anteriores al dia de hoy (${hoy}).`,
-        );
+        throw new BadRequestException({
+          message: `La fecha de reserva no es factible.`,
+          puedeUltimoMomento: options?.puedeUltimoMomento ?? false,
+        });
       }
     }
   }
@@ -865,5 +1092,142 @@ export class ReservasV2Service {
       [TipoBloqueo.MANUAL]: 'manual',
     };
     return map[tipo] ?? tipo;
+  }
+
+  private mapTareaDashboard(t: TareaOperativa): {
+    categoria: DashboardCategoria;
+    titulo: string;
+    descripcion: string | null;
+  } {
+    const cliente =
+      t.clienteNombre ?? t.reserva?.clienteNombre ?? 'Cliente sin nombre';
+    const prenda = this.labelPrendaTareaDashboard(t);
+    if (t.tipoTarea === TipoTareaOperativa.CONTACTAR_MEDICION) {
+      return {
+        categoria: 'contactar_medicion',
+        titulo: `Contactar medición · ${cliente}`,
+        descripcion: prenda,
+      };
+    }
+    if (t.tipoTarea === TipoTareaOperativa.LLEVAR_LAVANDERIA) {
+      const enLav = t.estado === EstadoTareaOperativa.EN_PROCESO;
+      return {
+        categoria: enLav ? 'retirar_lavanderia' : 'llevar_lavanderia',
+        titulo: enLav
+          ? `Retirar de lavandería · ${cliente}`
+          : `Llevar a lavandería · ${cliente}`,
+        descripcion: prenda,
+      };
+    }
+    if (t.tipoTarea === TipoTareaOperativa.LLEVAR_MODISTA) {
+      const enMod = t.estado === EstadoTareaOperativa.EN_PROCESO;
+      return {
+        categoria: enMod ? 'retirar_modista' : 'llevar_modista',
+        titulo: enMod
+          ? `Retirar de modista · ${cliente}`
+          : `Llevar a modista · ${cliente}`,
+        descripcion: prenda,
+      };
+    }
+    return {
+      categoria: 'contactar_medicion',
+      titulo: `Tarea operativa · ${cliente}`,
+      descripcion: prenda,
+    };
+  }
+
+  private labelPrendaTareaDashboard(t: TareaOperativa): string | null {
+    if (t.tipoPrenda === TipoPrenda.SACO && t.saco) {
+      return `Saco ${t.saco.codigo}`;
+    }
+    if (t.tipoPrenda === TipoPrenda.PANTALON && t.pantalon) {
+      return `Pantalón ${t.pantalon.codigo}`;
+    }
+    return null;
+  }
+
+  private fechaReferenciaTarea(t: TareaOperativa): string | null {
+    const raw = t.fechaObjetivoDesde ?? t.fechaObjetivoHasta;
+    if (!raw || typeof raw !== 'string') return null;
+    return raw.includes('T')
+      ? raw.split('T')[0]!
+      : (DateUtils.normalizeDateOnly(raw) ?? raw);
+  }
+
+  private urgenciaDashboardDesdeFecha(
+    fechaRef: string | null,
+    hoy: string,
+  ): DashboardUrgencia {
+    if (!fechaRef) return 'SIN_FECHA';
+    const fechaOnly = fechaRef.includes('T')
+      ? fechaRef.split('T')[0]!
+      : fechaRef;
+    const d0 = parseISO(hoy);
+    const d1 = parseISO(fechaOnly);
+    const diff = differenceInCalendarDays(d1, d0);
+    if (diff < 0) return 'VENCIDA';
+    if (diff === 0) return 'HOY';
+    if (diff <= 7) return 'PROXIMA';
+    return 'FUTURA';
+  }
+
+  private resumenPrendasReservaDashboard(r: Reserva): string {
+    const s = `${r.saco.codigo} (${r.saco.marca})`;
+    if (r.pantalon) {
+      return `${s} · ${r.pantalon.codigo} (${r.pantalon.marca})`;
+    }
+    return s;
+  }
+
+  private ordenarItemsDashboard(items: DashboardItemDto[]): void {
+    const ordenUrg = (u: DashboardUrgencia): number => {
+      const m: Record<DashboardUrgencia, number> = {
+        VENCIDA: 0,
+        HOY: 1,
+        PROXIMA: 2,
+        FUTURA: 3,
+        SIN_FECHA: 4,
+      };
+      return m[u];
+    };
+    const ordenPri = (p: PrioridadTareaOperativa | null): number => {
+      if (!p) return 3;
+      const m: Record<PrioridadTareaOperativa, number> = {
+        [PrioridadTareaOperativa.ALTA]: 0,
+        [PrioridadTareaOperativa.MEDIA]: 1,
+        [PrioridadTareaOperativa.BAJA]: 2,
+      };
+      return m[p];
+    };
+    items.sort((a, b) => {
+      const ou = ordenUrg(a.urgencia) - ordenUrg(b.urgencia);
+      if (ou !== 0) return ou;
+      const fa = a.fechaReferencia ?? '9999-12-31';
+      const fb = b.fechaReferencia ?? '9999-12-31';
+      const cf = fa.localeCompare(fb);
+      if (cf !== 0) return cf;
+      return ordenPri(a.prioridad) - ordenPri(b.prioridad);
+    });
+  }
+
+  private resumenUrgenciasDashboard(
+    items: DashboardItemDto[],
+  ): DashboardOperativoResponse['resumen'] {
+    const init = {
+      vencidas: 0,
+      hoy: 0,
+      proximas: 0,
+      futuras: 0,
+      sinFecha: 0,
+      total: items.length,
+    };
+    for (const i of items) {
+      if (i.urgencia === 'VENCIDA') init.vencidas++;
+      else if (i.urgencia === 'HOY') init.hoy++;
+      else if (i.urgencia === 'PROXIMA') init.proximas++;
+      else if (i.urgencia === 'FUTURA') init.futuras++;
+      else init.sinFecha++;
+    }
+    return init;
   }
 }
