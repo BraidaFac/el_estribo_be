@@ -12,9 +12,18 @@ export enum CondicionPrenda {
 export enum EstadoReserva {
   PENDIENTE = 'PENDIENTE',
   CONFIRMADA = 'CONFIRMADA',
+  /** Control pre-entrega aprobado; habilita retiro en el local. */
+  LISTO_PARA_ENTREGAR = 'LISTO_PARA_ENTREGAR',
   EN_CURSO = 'EN_CURSO',
   COMPLETADA = 'COMPLETADA',
   CANCELADA = 'CANCELADA',
+}
+
+export enum EstadoControlPreEntrega {
+  APROBADO = 'APROBADO',
+  RECHAZADO = 'RECHAZADO',
+  /** Rechazo corregido manualmente; equivalente a aprobado para retiro. */
+  RESUELTO = 'RESUELTO',
 }
 
 export enum EstadoUbicacionPrenda {
@@ -69,4 +78,36 @@ export enum EstadoAgendaMedicion {
   NO_ASISTIO = 'NO_ASISTIO',
   REPROGRAMADA = 'REPROGRAMADA',
   CANCELADA = 'CANCELADA',
+}
+
+/** Inspección al devolver: botones / cierres. */
+export enum BotonesCierresInspeccion {
+  OK = 'OK',
+  DANO_LEVE = 'DANO_LEVE',
+}
+
+/** Inspección al devolver: ruedos / telas. */
+export enum RuedosTelasInspeccion {
+  OK = 'OK',
+  ENGANCHE = 'ENGANCHE',
+  ROTURA = 'ROTURA',
+}
+
+/** Daño grave al devolver el traje. */
+export enum DanoGraveInspeccion {
+  OK = 'OK',
+  QUEMADURA = 'QUEMADURA',
+  MANCHA_QUIMICA = 'MANCHA_QUIMICA',
+}
+
+/** Estado general del traje al devolver. */
+export enum EstadoGeneralDevolucion {
+  SUCIIO_O_MANCHADO = 'SUCIIO_O_MANCHADO',
+  IMPECABLE = 'IMPECABLE',
+}
+
+/** Destino de lavado tras la devolución. */
+export enum DecisionLavadoPostDevolucion {
+  LAVANDERIA_EXTERNA = 'LAVANDERIA_EXTERNA',
+  LIMPIEZA_LOCAL = 'LIMPIEZA_LOCAL',
 }

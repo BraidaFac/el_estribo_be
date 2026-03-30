@@ -13,6 +13,8 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from 'src/auth/auth.guard';
 import { AccionReservaDto } from '../dto/accion-reserva.dto';
+import { DevolucionClienteDto } from '../dto/devolucion-cliente.dto';
+import { QueryHistorialReservasDto } from '../dto/query-historial-reservas.dto';
 import { ActualizarReservaV2Dto } from '../dto/actualizar-reserva-v2.dto';
 import { CreateReservaV2Dto } from '../dto/create-reserva-v2.dto';
 import { QueryReservasRangoDto } from '../dto/query-reservas-rango.dto';
@@ -42,6 +44,11 @@ export class ReservasV2Controller {
   @Get('dashboard-operativo')
   dashboardOperativo() {
     return this.reservasV2Service.dashboardOperativo();
+  }
+
+  @Get('historial')
+  listarHistorial(@Query() query: QueryHistorialReservasDto) {
+    return this.reservasV2Service.listarHistorialReservas(query);
   }
 
   @Get('disponibilidad/sacos/:sacoId')
@@ -80,6 +87,11 @@ export class ReservasV2Controller {
     return this.reservasV2Service.actualizarReserva(reservaId, body);
   }
 
+  @Get(':reservaId/detalle-operativo')
+  detalleOperativo(@Param('reservaId', ParseIntPipe) reservaId: number) {
+    return this.reservasV2Service.obtenerDetalleOperativoReserva(reservaId);
+  }
+
   @Get(':reservaId/mediciones')
   obtenerMediciones(@Param('reservaId', ParseIntPipe) reservaId: number) {
     return this.medicionesReservaService.obtenerPorReserva(reservaId);
@@ -114,11 +126,12 @@ export class ReservasV2Controller {
   @Post(':reservaId/devolver')
   marcarDevolucion(
     @Param('reservaId', ParseIntPipe) reservaId: number,
-    @Body() body: AccionReservaDto,
+    @Body() body: DevolucionClienteDto,
     @Req() request: any,
   ) {
     return this.reservasV2Service.marcarDevolucionCliente(
       reservaId,
+      body.recepcion,
       body.usuarioId ?? request?.user?.sub,
       body.motivo,
     );

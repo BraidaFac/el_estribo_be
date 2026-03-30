@@ -1,21 +1,27 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from 'src/auth/auth.module';
+import { ControlPreEntregaModule } from '../control-pre-entrega/control-pre-entrega.module';
 import { BloqueosModule } from '../bloqueos/bloqueos.module';
+import { CalendarioLaboralModule } from '../calendario-laboral/calendario-laboral.module';
 import { BloqueoPrenda } from '../bloqueos/entity/bloqueo-prenda.entity';
 import { BloqueoPrendaEvento } from '../bloqueos/entity/bloqueo-prenda-evento.entity';
 import { ConfiguracionGeneralModule } from '../configuracion-general/configuracion-general.module';
 import { Lavanderia } from '../lavanderias/entity/lavanderia.entity';
 import { Modista } from '../modistas/entity/modista.entity';
 import { OperacionesPrendaModule } from '../operaciones-prenda/operaciones-prenda.module';
+import { MovimientoPrenda } from '../operaciones-prenda/entity/movimiento-prenda.entity';
 import { Pantalon } from '../pantalones/entity/pantalon.entity';
 import { PantalonesModule } from '../pantalones/pantalones.module';
+import { AgendaMedicion } from '../tareas-operativas/entity/agenda-medicion.entity';
+import { TareaOperativa } from '../tareas-operativas/entity/tarea-operativa.entity';
 import { TareasOperativasModule } from '../tareas-operativas/tareas-operativas.module';
 import { ReservasV2Controller } from './controller/reservas-v2.controller';
 import { SacosModule } from '../sacos/sacos.module';
 import { Saco } from '../sacos/entity/saco.entity';
 import { AsignacionServicioReserva } from './entity/asignacion-servicio-reserva.entity';
 import { MedicionReserva } from './entity/medicion-reserva.entity';
+import { RecepcionDevolucionReserva } from './entity/recepcion-devolucion-reserva.entity';
 import { Reserva } from './entity/reserva.entity';
 import { DisponibilidadService } from './service/disponibilidad.service';
 import { MedicionesReservaService } from './service/mediciones-reserva.service';
@@ -33,6 +39,10 @@ import { ReservasV2Service } from './service/reservas-v2.service';
       Pantalon,
       Lavanderia,
       Modista,
+      RecepcionDevolucionReserva,
+      TareaOperativa,
+      MovimientoPrenda,
+      AgendaMedicion,
     ]),
     AuthModule,
     SacosModule,
@@ -41,6 +51,8 @@ import { ReservasV2Service } from './service/reservas-v2.service';
     ConfiguracionGeneralModule,
     OperacionesPrendaModule,
     TareasOperativasModule,
+    ControlPreEntregaModule,
+    CalendarioLaboralModule,
   ],
   controllers: [ReservasV2Controller],
   providers: [DisponibilidadService, ReservasV2Service, MedicionesReservaService],

@@ -3,6 +3,7 @@ import { ConfigModule, ConfigType } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from './auth/auth.module';
 import { BloqueosModule } from './modules/bloqueos/bloqueos.module';
+import { ControlPreEntregaModule } from './modules/control-pre-entrega/control-pre-entrega.module';
 import { CalendarioLaboralModule } from './modules/calendario-laboral/calendario-laboral.module';
 import { ConfiguracionGeneralModule } from './modules/configuracion-general/configuracion-general.module';
 import { LavanderiasModule } from './modules/lavanderias/lavanderias.module';
@@ -43,6 +44,7 @@ import { UserModule } from './user/user.module';
     ModistasModule,
     OperacionesPrendaModule,
     TareasOperativasModule,
+    ControlPreEntregaModule,
     AuthModule,
     UserModule,
   ],

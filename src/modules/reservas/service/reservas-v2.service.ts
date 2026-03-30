@@ -12,21 +12,29 @@ import {
   RangoPlanificado,
 } from 'src/modules/bloqueos/service/bloqueo-planner.service';
 import {
+  BotonesCierresInspeccion,
+  DanoGraveInspeccion,
+  DecisionLavadoPostDevolucion,
   EstadoBloqueo,
   EstadoReserva,
   EstadoTareaOperativa,
   EstadoUbicacionPrenda,
   PrioridadTareaOperativa,
+  RuedosTelasInspeccion,
   TipoBloqueo,
   TipoPrenda,
   TipoTareaOperativa,
 } from 'src/modules/common/enums/reservas-domain.enums';
+import { CalendarioLaboralService } from 'src/modules/calendario-laboral/service/calendario-laboral.service';
 import { ConfiguracionGeneralService } from 'src/modules/configuracion-general/service/configuracion-general.service';
+import { ControlPreEntregaService } from 'src/modules/control-pre-entrega/service/control-pre-entrega.service';
 import { Lavanderia } from 'src/modules/lavanderias/entity/lavanderia.entity';
 import { Modista } from 'src/modules/modistas/entity/modista.entity';
+import { MovimientoPrenda } from 'src/modules/operaciones-prenda/entity/movimiento-prenda.entity';
 import { OperacionesPrendaService } from 'src/modules/operaciones-prenda/service/operaciones-prenda.service';
 import { Pantalon } from 'src/modules/pantalones/entity/pantalon.entity';
 import { Saco } from 'src/modules/sacos/entity/saco.entity';
+import { AgendaMedicion } from 'src/modules/tareas-operativas/entity/agenda-medicion.entity';
 import { TareaOperativa } from 'src/modules/tareas-operativas/entity/tarea-operativa.entity';
 import { TareasOperativasService } from 'src/modules/tareas-operativas/service/tareas-operativas.service';
 import { DateUtils } from 'src/utils/date_utils';
@@ -39,8 +47,16 @@ import {
   DashboardOperativoResponse,
   DashboardUrgencia,
 } from '../dto/dashboard-operativo.types';
+import { RecepcionDevolucionPayloadDto } from '../dto/devolucion-cliente.dto';
+import { QueryHistorialReservasDto } from '../dto/query-historial-reservas.dto';
+import {
+  HistorialReservasResponse,
+  ReservaDetalleOperativoResponse,
+  TrazabilidadEventoDto,
+} from '../dto/reserva-detalle-operativo.dto';
 import { ValidarReservaV2Dto } from '../dto/validar-reserva-v2.dto';
 import { AsignacionServicioReserva } from '../entity/asignacion-servicio-reserva.entity';
+import { RecepcionDevolucionReserva } from '../entity/recepcion-devolucion-reserva.entity';
 import { Reserva } from '../entity/reserva.entity';
 import { DisponibilidadService } from './disponibilidad.service';
 
@@ -84,6 +100,16 @@ export class ReservasV2Service {
     private readonly bloqueoPlannerService: BloqueoPlannerService,
     private readonly operacionesPrendaService: OperacionesPrendaService,
     private readonly tareasOperativasService: TareasOperativasService,
+    private readonly controlPreEntregaService: ControlPreEntregaService,
+    private readonly calendarioLaboralService: CalendarioLaboralService,
+    @InjectRepository(RecepcionDevolucionReserva)
+    private readonly recepcionDevolucionRepository: Repository<RecepcionDevolucionReserva>,
+    @InjectRepository(TareaOperativa)
+    private readonly tareaOperativaRepository: Repository<TareaOperativa>,
+    @InjectRepository(MovimientoPrenda)
+    private readonly movimientoPrendaRepository: Repository<MovimientoPrenda>,
+    @InjectRepository(AgendaMedicion)
+    private readonly agendaMedicionRepository: Repository<AgendaMedicion>,
   ) {}
 
   async validarPreConfirmacion(input: ValidarReservaV2Dto): Promise<void> {
@@ -344,9 +370,9 @@ export class ReservasV2Service {
       bump(mapped.categoria);
     }
 
-    const [confirmadas, enCurso] = await Promise.all([
+    const [listasParaRetiro, enCurso] = await Promise.all([
       this.reservaRepository.find({
-        where: { estadoReserva: EstadoReserva.CONFIRMADA },
+        where: { estadoReserva: EstadoReserva.LISTO_PARA_ENTREGAR },
         relations: ['saco', 'pantalon'],
       }),
       this.reservaRepository.find({
@@ -355,11 +381,11 @@ export class ReservasV2Service {
       }),
     ]);
     await this.adjuntarAsignacionesServicioAReservas([
-      ...confirmadas,
+      ...listasParaRetiro,
       ...enCurso,
     ]);
 
-    for (const r of confirmadas) {
+    for (const r of listasParaRetiro) {
       const enriched = await this.enriquecerReserva(r);
       if (!enriched.accionesPermitidas.retirar.permitida) {
         continue;
@@ -388,6 +414,9 @@ export class ReservasV2Service {
         continue;
       }
       const fechaRef =
+        (await this.fechaReferenciaDevolucionDashboard(
+          enriched.fechaReserva,
+        )) ??
         DateUtils.normalizeDateOnly(enriched.fechaReserva) ??
         enriched.fechaReserva;
       items.push({
@@ -534,16 +563,55 @@ export class ReservasV2Service {
 
   async marcarDevolucionCliente(
     reservaId: number,
+    recepcion: RecepcionDevolucionPayloadDto,
     usuarioId?: string,
     motivo?: string,
   ): Promise<ReservaConAcciones> {
+    this.assertRecepcionDevolucionPayload(recepcion);
     return this.dataSource.transaction(async (manager) => {
+      const duplicado = await manager
+        .getRepository(RecepcionDevolucionReserva)
+        .findOne({ where: { reserva: { id: reservaId } } });
+      if (duplicado) {
+        throw new BadRequestException(
+          'Ya existe un registro de recepción/devolución para esta reserva',
+        );
+      }
+
       const reserva = await this.obtenerReserva(reservaId, manager);
       this.assertPuedeDevolver(reserva);
 
+      const hoy = DateUtils.getTodayDateOnly();
+      const recepcionRow = manager
+        .getRepository(RecepcionDevolucionReserva)
+        .create({
+          reserva: { id: reservaId } as Reserva,
+          fechaDevolucion: hoy,
+          botonesCierresEstado: recepcion.botonesCierresEstado,
+          botonesCierresCobro: recepcion.botonesCierresCobro ?? null,
+          ruedosTelasEstado: recepcion.ruedosTelasEstado,
+          ruedosTelasCobro: recepcion.ruedosTelasCobro ?? null,
+          danoGraveEstado: recepcion.danoGraveEstado,
+          danoGraveCobro: recepcion.danoGraveCobro ?? null,
+          demoraDias:
+            recepcion.demoraDias === undefined ? null : recepcion.demoraDias,
+          estadoGeneral: recepcion.estadoGeneral,
+          decisionLavado: recepcion.decisionLavado,
+          responsableLimpiezaLocal:
+            recepcion.decisionLavado ===
+            DecisionLavadoPostDevolucion.LIMPIEZA_LOCAL
+              ? (recepcion.responsableLimpiezaLocal?.trim() ?? null)
+              : null,
+        });
+      await manager
+        .getRepository(RecepcionDevolucionReserva)
+        .save(recepcionRow);
+
       reserva.estadoReserva = EstadoReserva.COMPLETADA;
-      reserva.clienteDevolvioAt = DateUtils.getTodayDateOnly();
+      reserva.clienteDevolvioAt = hoy;
       await manager.getRepository(Reserva).save(reserva);
+
+      const motivoFinal = motivo ?? 'Cliente devolvio traje';
 
       await this.operacionesPrendaService.actualizarUbicacion(
         TipoPrenda.SACO,
@@ -552,7 +620,7 @@ export class ReservasV2Service {
         {
           manager,
           usuarioId: usuarioId ?? null,
-          motivo: motivo ?? 'Cliente devolvio traje',
+          motivo: motivoFinal,
           reservaId,
         },
       );
@@ -564,7 +632,7 @@ export class ReservasV2Service {
           {
             manager,
             usuarioId: usuarioId ?? null,
-            motivo: motivo ?? 'Cliente devolvio traje',
+            motivo: motivoFinal,
             reservaId,
           },
         );
@@ -579,6 +647,56 @@ export class ReservasV2Service {
       const reservaActualizada = await this.obtenerReserva(reservaId, manager);
       return this.enriquecerReserva(reservaActualizada);
     });
+  }
+
+  async listarHistorialReservas(
+    query: QueryHistorialReservasDto,
+  ): Promise<HistorialReservasResponse> {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 30;
+    const skip = (page - 1) * limit;
+
+    const qb = this.reservaRepository
+      .createQueryBuilder('reserva')
+      .leftJoinAndSelect('reserva.saco', 'saco')
+      .leftJoinAndSelect('reserva.pantalon', 'pantalon')
+      .orderBy('reserva.createdAt', 'DESC');
+
+    const texto = query.buscar?.trim();
+    if (texto) {
+      const like = `%${texto}%`;
+      qb.andWhere(
+        '(CAST(reserva.id AS CHAR) LIKE :hist OR reserva.clienteNombre LIKE :hist OR reserva.clienteDni LIKE :hist OR saco.codigo LIKE :hist OR pantalon.codigo LIKE :hist)',
+        { hist: like },
+      );
+    }
+
+    const [rows, total] = await qb.skip(skip).take(limit).getManyAndCount();
+    await this.adjuntarAsignacionesServicioAReservas(rows);
+    const items = await Promise.all(rows.map((r) => this.enriquecerReserva(r)));
+    return { items, total, page, limit };
+  }
+
+  async obtenerDetalleOperativoReserva(
+    reservaId: number,
+  ): Promise<ReservaDetalleOperativoResponse> {
+    const reserva = await this.obtenerReserva(reservaId);
+    await this.adjuntarAsignacionesServicioAReservas([reserva]);
+    const enriched = await this.enriquecerReserva(reserva);
+    const [controlPreEntrega, recepcionDevolucion, trazabilidad] =
+      await Promise.all([
+        this.controlPreEntregaService.obtenerPorReservaId(reservaId),
+        this.recepcionDevolucionRepository.findOne({
+          where: { reserva: { id: reservaId } },
+        }),
+        this.construirTrazabilidadReserva(reservaId),
+      ]);
+    return {
+      reserva: enriched,
+      controlPreEntrega,
+      recepcionDevolucion,
+      trazabilidad,
+    };
   }
 
   async cancelarReserva(
@@ -926,13 +1044,26 @@ export class ReservasV2Service {
     reserva: Reserva,
   ): Promise<ReservaAccionesPermitidas> {
     const puedeEditar = reserva.estadoReserva !== EstadoReserva.CANCELADA;
-    const puedeCancelar = reserva.estadoReserva === EstadoReserva.CONFIRMADA;
+    const puedeCancelar =
+      reserva.estadoReserva === EstadoReserva.CONFIRMADA ||
+      reserva.estadoReserva === EstadoReserva.LISTO_PARA_ENTREGAR;
     const ubicacionInvalidaRetiro = this.getMotivoUbicacionRetiro(reserva);
     const fueraVentanaRetiro = await this.getMotivoVentanaRetiro(reserva);
+    const motivoControl =
+      reserva.estadoReserva === EstadoReserva.LISTO_PARA_ENTREGAR
+        ? await this.controlPreEntregaService.motivoRetiroBloqueadoPorControl(
+            reserva.id,
+          )
+        : null;
     const puedeRetirar =
-      reserva.estadoReserva === EstadoReserva.CONFIRMADA &&
+      reserva.estadoReserva === EstadoReserva.LISTO_PARA_ENTREGAR &&
       ubicacionInvalidaRetiro === null &&
-      fueraVentanaRetiro === null;
+      fueraVentanaRetiro === null &&
+      motivoControl === null;
+    const motivoRetirarDenegado =
+      reserva.estadoReserva !== EstadoReserva.LISTO_PARA_ENTREGAR
+        ? 'Solo se pueden retirar reservas listas para entregar (control pre-entrega aprobado)'
+        : (fueraVentanaRetiro ?? ubicacionInvalidaRetiro ?? motivoControl);
     const motivoVentanaDevolucion = this.getMotivoVentanaDevolucion(reserva);
     const puedeDevolver =
       reserva.estadoReserva === EstadoReserva.EN_CURSO &&
@@ -945,14 +1076,9 @@ export class ReservasV2Service {
       ),
       cancelar: this.enrichAccionPermitida(
         puedeCancelar,
-        'Solo se pueden cancelar reservas confirmadas',
+        'Solo se pueden cancelar reservas confirmadas o listas para entregar',
       ),
-      retirar: this.enrichAccionPermitida(
-        puedeRetirar,
-        reserva.estadoReserva !== EstadoReserva.CONFIRMADA
-          ? 'Solo se pueden retirar reservas confirmadas'
-          : (fueraVentanaRetiro ?? ubicacionInvalidaRetiro),
-      ),
+      retirar: this.enrichAccionPermitida(puedeRetirar, motivoRetirarDenegado),
       devolver: this.enrichAccionPermitida(
         puedeDevolver,
         reserva.estadoReserva !== EstadoReserva.EN_CURSO
@@ -972,17 +1098,20 @@ export class ReservasV2Service {
   }
 
   private assertPuedeCancelar(reserva: Reserva): void {
-    if (reserva.estadoReserva !== EstadoReserva.CONFIRMADA) {
+    if (
+      reserva.estadoReserva !== EstadoReserva.CONFIRMADA &&
+      reserva.estadoReserva !== EstadoReserva.LISTO_PARA_ENTREGAR
+    ) {
       throw new BadRequestException(
-        'Solo se pueden cancelar reservas confirmadas',
+        'Solo se pueden cancelar reservas confirmadas o listas para entregar',
       );
     }
   }
 
   private async assertPuedeRetirar(reserva: Reserva): Promise<void> {
-    if (reserva.estadoReserva !== EstadoReserva.CONFIRMADA) {
+    if (reserva.estadoReserva !== EstadoReserva.LISTO_PARA_ENTREGAR) {
       throw new BadRequestException(
-        'Solo se pueden retirar reservas confirmadas',
+        'Solo se pueden retirar reservas listas para entregar (control pre-entrega aprobado)',
       );
     }
     const motivoVentana = await this.getMotivoVentanaRetiro(reserva);
@@ -993,6 +1122,7 @@ export class ReservasV2Service {
     if (motivo) {
       throw new BadRequestException(motivo);
     }
+    await this.controlPreEntregaService.assertControlPermiteRetiro(reserva.id);
   }
 
   private assertPuedeDevolver(reserva: Reserva): void {
@@ -1146,6 +1276,23 @@ export class ReservasV2Service {
     return null;
   }
 
+  /** Primer día hábil después de la fecha de reserva (referencia para devolución en curso en dashboard). */
+  private async fechaReferenciaDevolucionDashboard(
+    fechaReservaRaw: string,
+  ): Promise<string | null> {
+    const normalized =
+      DateUtils.normalizeDateOnly(fechaReservaRaw) ?? fechaReservaRaw;
+    const base = DateUtils.toDateOnly(normalized);
+    if (!base) {
+      return null;
+    }
+    const objetivo = await this.calendarioLaboralService.sumarDiasHabiles(
+      base,
+      1,
+    );
+    return DateUtils.formatDateOnly(objetivo);
+  }
+
   private fechaReferenciaTarea(t: TareaOperativa): string | null {
     const raw = t.fechaObjetivoDesde ?? t.fechaObjetivoHasta;
     if (!raw || typeof raw !== 'string') return null;
@@ -1229,5 +1376,201 @@ export class ReservasV2Service {
       else init.sinFecha++;
     }
     return init;
+  }
+
+  private assertRecepcionDevolucionPayload(
+    p: RecepcionDevolucionPayloadDto,
+  ): void {
+    const cobroValido = (n?: number | null) =>
+      n != null && !Number.isNaN(Number(n)) && Number(n) > 0;
+
+    if (p.botonesCierresEstado === BotonesCierresInspeccion.DANO_LEVE) {
+      if (!cobroValido(p.botonesCierresCobro)) {
+        throw new BadRequestException(
+          'Indique el monto de cobro por arreglo (botones/cierres)',
+        );
+      }
+    } else if (
+      p.botonesCierresCobro != null &&
+      Number(p.botonesCierresCobro) > 0
+    ) {
+      throw new BadRequestException(
+        'No informe cobro en botones/cierres si el estado es OK',
+      );
+    }
+
+    if (
+      p.ruedosTelasEstado === RuedosTelasInspeccion.ENGANCHE ||
+      p.ruedosTelasEstado === RuedosTelasInspeccion.ROTURA
+    ) {
+      if (!cobroValido(p.ruedosTelasCobro)) {
+        throw new BadRequestException(
+          'Indique el monto de cobro por arreglo (ruedos/telas)',
+        );
+      }
+    } else if (p.ruedosTelasCobro != null && Number(p.ruedosTelasCobro) > 0) {
+      throw new BadRequestException(
+        'No informe cobro en ruedos/telas si el estado es OK',
+      );
+    }
+
+    if (
+      p.danoGraveEstado === DanoGraveInspeccion.QUEMADURA ||
+      p.danoGraveEstado === DanoGraveInspeccion.MANCHA_QUIMICA
+    ) {
+      if (!cobroValido(p.danoGraveCobro)) {
+        throw new BadRequestException(
+          'Indique el monto por traje nuevo (daño grave)',
+        );
+      }
+    } else if (p.danoGraveCobro != null && Number(p.danoGraveCobro) > 0) {
+      throw new BadRequestException(
+        'No informe monto por traje nuevo si el daño grave es OK',
+      );
+    }
+
+    if (
+      p.decisionLavado === DecisionLavadoPostDevolucion.LIMPIEZA_LOCAL &&
+      !p.responsableLimpiezaLocal?.trim()
+    ) {
+      throw new BadRequestException('Indique el responsable de limpieza local');
+    }
+  }
+
+  private async construirTrazabilidadReserva(
+    reservaId: number,
+  ): Promise<TrazabilidadEventoDto[]> {
+    const items: TrazabilidadEventoDto[] = [];
+    const reserva = await this.reservaRepository.findOne({
+      where: { id: reservaId },
+      relations: ['saco', 'pantalon'],
+    });
+    if (!reserva) {
+      return [];
+    }
+
+    items.push({
+      id: 'evt-reserva-creada',
+      categoria: 'reserva',
+      titulo: 'Reserva registrada',
+      descripcion: null,
+      fecha:
+        reserva.createdAt instanceof Date
+          ? reserva.createdAt.toISOString()
+          : String(reserva.createdAt),
+    });
+
+    const tareas = await this.tareaOperativaRepository.find({
+      where: { reserva: { id: reservaId } },
+      relations: ['saco', 'pantalon'],
+      order: { id: 'ASC' },
+    });
+    for (const t of tareas) {
+      const fechaRef =
+        t.estado === EstadoTareaOperativa.COMPLETADA
+          ? t.updatedAt
+          : t.createdAt;
+      const fechaIso =
+        fechaRef instanceof Date ? fechaRef.toISOString() : String(fechaRef);
+      const prenda =
+        t.tipoPrenda === TipoPrenda.SACO
+          ? `Saco ${t.saco?.codigo ?? ''}`
+          : t.tipoPrenda === TipoPrenda.PANTALON
+            ? `Pantalón ${t.pantalon?.codigo ?? ''}`
+            : '';
+      items.push({
+        id: `evt-tarea-${t.id}`,
+        categoria: 'tarea',
+        titulo: this.tituloTareaTrazabilidad(t.tipoTarea),
+        descripcion: `${t.estado}${prenda ? ` · ${prenda}` : ''}`,
+        fecha: fechaIso,
+      });
+    }
+
+    const movs = await this.movimientoPrendaRepository.find({
+      where: { reserva: { id: reservaId } },
+      relations: ['saco', 'pantalon'],
+      order: { id: 'ASC' },
+    });
+    for (const m of movs) {
+      items.push({
+        id: `evt-mov-${m.id}`,
+        categoria: 'movimiento',
+        titulo: 'Cambio de ubicación de prenda',
+        descripcion: `${m.estadoAnterior ?? '?'} → ${m.estadoNuevo}${m.motivo ? ` · ${m.motivo}` : ''}`,
+        fecha:
+          m.createdAt instanceof Date
+            ? m.createdAt.toISOString()
+            : String(m.createdAt),
+      });
+    }
+
+    const agendas = await this.agendaMedicionRepository.find({
+      where: { reserva: { id: reservaId } },
+      order: { id: 'ASC' },
+    });
+    for (const a of agendas) {
+      const fh =
+        a.fechaHoraCita instanceof Date
+          ? a.fechaHoraCita.toISOString()
+          : String(a.fechaHoraCita);
+      items.push({
+        id: `evt-agenda-${a.id}`,
+        categoria: 'agenda',
+        titulo: `Agenda medición (${a.estado})`,
+        descripcion: a.observaciones?.trim() || null,
+        fecha: fh,
+      });
+    }
+
+    const ctrl =
+      await this.controlPreEntregaService.obtenerPorReservaId(reservaId);
+    if (ctrl) {
+      items.push({
+        id: `evt-preentrega-${ctrl.id}`,
+        categoria: 'control_pre_entrega',
+        titulo: `Control pre-entrega (${ctrl.estado})`,
+        descripcion: `Auditor: ${ctrl.auditorNombre}`,
+        fecha:
+          ctrl.createdAt instanceof Date
+            ? ctrl.createdAt.toISOString()
+            : String(ctrl.createdAt),
+      });
+    }
+
+    if (reserva.clienteRetiroAt) {
+      items.push({
+        id: 'evt-retiro-cliente',
+        categoria: 'cliente',
+        titulo: 'Retiro del traje por el cliente',
+        descripcion: null,
+        fecha: reserva.clienteRetiroAt,
+      });
+    }
+    if (reserva.clienteDevolvioAt) {
+      items.push({
+        id: 'evt-devolucion-cliente',
+        categoria: 'cliente',
+        titulo: 'Devolución del traje por el cliente',
+        descripcion: null,
+        fecha: reserva.clienteDevolvioAt,
+      });
+    }
+
+    items.sort((a, b) => {
+      const fa = a.fecha ?? '';
+      const fb = b.fecha ?? '';
+      return fa.localeCompare(fb);
+    });
+    return items;
+  }
+
+  private tituloTareaTrazabilidad(tipo: TipoTareaOperativa): string {
+    const m: Record<TipoTareaOperativa, string> = {
+      [TipoTareaOperativa.CONTACTAR_MEDICION]: 'Tarea: contactar medición',
+      [TipoTareaOperativa.LLEVAR_LAVANDERIA]: 'Tarea: lavandería',
+      [TipoTareaOperativa.LLEVAR_MODISTA]: 'Tarea: modista',
+    };
+    return m[tipo] ?? 'Tarea operativa';
   }
 }

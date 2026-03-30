@@ -118,6 +118,51 @@ export class TareasOperativasService {
   }
 
   /**
+   * Reservas con al menos una tarea operativa abierta (misma regla que el dashboard).
+   * No ejecuta `asegurarTareasContactoMedicion` para evitar efectos secundarios en GET.
+   */
+  async reservasIdsConTareasOperativasAbiertas(
+    reservaIds: number[],
+  ): Promise<Set<number>> {
+    if (reservaIds.length === 0) {
+      return new Set();
+    }
+    const raw = await this.tareaRepository
+      .createQueryBuilder('tarea')
+      .select('tarea.reserva_id', 'rid')
+      .distinct(true)
+      .where('tarea.reserva_id IN (:...ids)', { ids: reservaIds })
+      .andWhere(
+        '(tarea.tipo_tarea IN (:...tiposLlevar) AND tarea.estado IN (:...estadosLlevar)) OR (tarea.tipo_tarea = :contactar AND tarea.estado NOT IN (:...cerrados))',
+        {
+          tiposLlevar: [
+            TipoTareaOperativa.LLEVAR_LAVANDERIA,
+            TipoTareaOperativa.LLEVAR_MODISTA,
+          ],
+          estadosLlevar: [
+            EstadoTareaOperativa.PENDIENTE,
+            EstadoTareaOperativa.EN_PROCESO,
+          ],
+          contactar: TipoTareaOperativa.CONTACTAR_MEDICION,
+          cerrados: [
+            EstadoTareaOperativa.COMPLETADA,
+            EstadoTareaOperativa.CANCELADA,
+          ],
+        },
+      )
+      .getRawMany();
+    const out = new Set<number>();
+    for (const row of raw) {
+      const v = row.rid;
+      const n = Number(v);
+      if (Number.isInteger(n) && n > 0) {
+        out.add(n);
+      }
+    }
+    return out;
+  }
+
+  /**
    * Tareas operativas abiertas: lavandería/modista (pendiente o en proceso) y
    * contactar medición (excluye completadas/canceladas).
    */

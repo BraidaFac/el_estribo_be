@@ -1,10 +1,10 @@
+import { Transform } from 'class-transformer';
+import { IsArray, IsEnum, IsInt, IsOptional } from 'class-validator';
 import {
   EstadoTareaOperativa,
   PrioridadTareaOperativa,
   TipoTareaOperativa,
 } from 'src/modules/common/enums/reservas-domain.enums';
-import { Transform } from 'class-transformer';
-import { IsArray, IsEnum, IsInt, IsOptional } from 'class-validator';
 
 export class ListarTareasOperativasQueryDto {
   @IsOptional()

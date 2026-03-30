@@ -1,0 +1,96 @@
+import { EstadoControlPreEntrega } from 'src/modules/common/enums/reservas-domain.enums';
+import { Reserva } from 'src/modules/reservas/entity/reserva.entity';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
+
+@Entity({ name: 'control_pre_entrega' })
+export class ControlPreEntrega {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @ManyToOne(() => Reserva, { nullable: false, onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'reserva_id' })
+  reserva: Reserva;
+
+  @Column({ name: 'aroma_score', type: 'tinyint' })
+  aromaScore: number;
+
+  @Column({ name: 'aroma_obs', type: 'varchar', length: 400, nullable: true })
+  aromaObs: string | null;
+
+  @Column({ name: 'planchado_score', type: 'tinyint' })
+  planchadoScore: number;
+
+  @Column({
+    name: 'planchado_obs',
+    type: 'varchar',
+    length: 400,
+    nullable: true,
+  })
+  planchadoObs: string | null;
+
+  @Column({ name: 'sastreria_score', type: 'tinyint' })
+  sastreriaScore: number;
+
+  @Column({
+    name: 'sastreria_obs',
+    type: 'varchar',
+    length: 400,
+    nullable: true,
+  })
+  sastreriaObs: string | null;
+
+  @Column({ name: 'higiene_score', type: 'tinyint' })
+  higieneScore: number;
+
+  @Column({ name: 'higiene_obs', type: 'varchar', length: 400, nullable: true })
+  higieneObs: string | null;
+
+  @Column({ name: 'complementos_score', type: 'tinyint' })
+  complementosScore: number;
+
+  @Column({
+    name: 'complementos_obs',
+    type: 'varchar',
+    length: 400,
+    nullable: true,
+  })
+  complementosObs: string | null;
+
+  @Column({
+    type: 'enum',
+    enum: EstadoControlPreEntrega,
+  })
+  estado: EstadoControlPreEntrega;
+
+  @Column({
+    name: 'motivo_rechazo',
+    type: 'varchar',
+    length: 600,
+    nullable: true,
+  })
+  motivoRechazo: string | null;
+
+  @Column({ name: 'auditor_nombre', type: 'varchar', length: 120 })
+  auditorNombre: string;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
+  createdAt: Date;
+
+  @Column({ name: 'fecha_resolucion', type: 'date', nullable: true })
+  fechaResolucion: string | null;
+
+  @Column({
+    name: 'resuelto_por',
+    type: 'varchar',
+    length: 120,
+    nullable: true,
+  })
+  resueltoPor: string | null;
+}
