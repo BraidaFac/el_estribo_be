@@ -11,8 +11,8 @@ import {
   TipoPrenda,
 } from 'src/modules/common/enums/reservas-domain.enums';
 import { DataSource, EntityManager, Repository } from 'typeorm';
-import { BloqueoPrenda } from '../entity/bloqueo-prenda.entity';
 import { BloqueoPrendaEvento } from '../entity/bloqueo-prenda-evento.entity';
+import { BloqueoPrenda } from '../entity/bloqueo-prenda.entity';
 
 @Injectable()
 export class BloqueosService {
@@ -34,6 +34,9 @@ export class BloqueosService {
     const qb = this.bloqueoRepository
       .createQueryBuilder('b')
       .leftJoinAndSelect('b.reserva', 'reserva')
+      .leftJoinAndSelect('b.saco', 'saco')
+      .leftJoinAndSelect('b.pantalon', 'pantalon')
+      .leftJoinAndSelect('reserva.saco', 'reservaSaco')
       .leftJoinAndSelect('reserva.pantalon', 'reservaPantalon')
       .leftJoinAndSelect('b.modista', 'modista')
       .leftJoinAndSelect('b.lavanderia', 'lavanderia')
@@ -104,7 +107,7 @@ export class BloqueosService {
 
   /**
    * Cancela bloqueos LAVANDERIA activos y cancelables para una prenda concreta de una reserva.
- * Usado cuando la prenda no se envía a lavandería.
+   * Usado cuando la prenda no se envía a lavandería.
    */
   async cancelarBloquesLavanderiaActivosPorReservaYPrenda(
     reservaId: number,
@@ -146,7 +149,10 @@ export class BloqueosService {
           bloqueo,
           evento: 'CANCELADO_MANUAL',
           usuarioId: usuarioId ?? undefined,
-          payloadJson: { motivoCancelacion: motivo, origen: 'omitir_lavanderia' },
+          payloadJson: {
+            motivoCancelacion: motivo,
+            origen: 'omitir_lavanderia',
+          },
         }),
       );
     }

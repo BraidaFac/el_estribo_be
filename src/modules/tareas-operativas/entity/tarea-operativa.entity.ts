@@ -7,6 +7,7 @@ import {
 import { Pantalon } from 'src/modules/pantalones/entity/pantalon.entity';
 import { Reserva } from 'src/modules/reservas/entity/reserva.entity';
 import { Saco } from 'src/modules/sacos/entity/saco.entity';
+import { User } from 'src/user/user.entity';
 import {
   Column,
   CreateDateColumn,
@@ -84,11 +85,13 @@ export class TareaOperativa {
   @Column({ name: 'metadata_json', type: 'json', nullable: true })
   metadataJson: Record<string, unknown> | null;
 
-  @Column({ name: 'creado_por', type: 'varchar', length: 80, nullable: true })
-  creadoPor: string | null;
+  @ManyToOne(() => User, { nullable: true })
+  @JoinColumn({ name: 'creado_por_user_id' })
+  creadoPor: User | null;
 
-  @Column({ name: 'resuelto_por', type: 'varchar', length: 80, nullable: true })
-  resueltoPor: string | null;
+  @ManyToOne(() => User, { nullable: true })
+  @JoinColumn({ name: 'resuelto_por_user_id' })
+  resueltoPor: User | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
   createdAt: Date;

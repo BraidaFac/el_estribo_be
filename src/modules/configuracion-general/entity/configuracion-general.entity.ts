@@ -23,6 +23,13 @@ export class ConfiguracionGeneral {
   @Column({ name: 'cantidad_dias_permitido_retiro', type: 'int', default: 3 })
   cantidadDiasPermitidoRetiro: number;
 
+  @Column({
+    name: 'dashboard_dias_proximas_reservas',
+    type: 'int',
+    default: 15,
+  })
+  dashboardDiasProximasReservas: number;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
   createdAt: Date;
 

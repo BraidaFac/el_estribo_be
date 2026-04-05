@@ -7,7 +7,7 @@ import { UserService } from '../user/user.service';
 @Injectable()
 export class AuthService {
   constructor(
-    private usersService: UserService,
+    private readonly userService: UserService,
     private jwtService: JwtService,
   ) {}
 
@@ -15,7 +15,7 @@ export class AuthService {
     username: string,
     pass: string,
   ): Promise<{ access_token: string; user: Partial<User> }> {
-    const user = await this.usersService.findOne(username);
+    const user = await this.userService.findOne(username);
     if (!user) {
       throw new UnauthorizedException();
     }

@@ -1,4 +1,4 @@
-import { IsOptional, IsString } from 'class-validator';
+import { IsOptional } from 'class-validator';
 
 /**
  * Cuerpo libre con `saco` y/o `pantalon`: objetos con claves de medida y valores número o null.
@@ -10,8 +10,4 @@ export class GuardarMedicionesReservaDto {
 
   @IsOptional()
   pantalon?: Record<string, unknown>;
-
-  @IsOptional()
-  @IsString()
-  usuarioId?: string;
 }

@@ -1,18 +1,18 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { addDays } from 'date-fns';
 import { CalendarioLaboralService } from 'src/modules/calendario-laboral/service/calendario-laboral.service';
-import { ConfiguracionGeneralService } from 'src/modules/configuracion-general/service/configuracion-general.service';
 import {
   EstadoBloqueo,
   OrigenBloqueo,
   TipoBloqueo,
   TipoPrenda,
 } from 'src/modules/common/enums/reservas-domain.enums';
+import { ConfiguracionGeneralService } from 'src/modules/configuracion-general/service/configuracion-general.service';
 import { DateUtils } from 'src/utils/date_utils';
 import { EntityManager, Repository } from 'typeorm';
-import { BloqueoPrenda } from '../entity/bloqueo-prenda.entity';
 import { BloqueoPrendaEvento } from '../entity/bloqueo-prenda-evento.entity';
+import { BloqueoPrenda } from '../entity/bloqueo-prenda.entity';
 
 export type RangoPlanificado = {
   tipoBloqueo: TipoBloqueo;
@@ -95,6 +95,7 @@ export class BloqueoPlannerService {
     const configuracion = await this.configuracionGeneralService.obtener();
     const fechaReserva = DateUtils.toDateOnly(fechaReservaIso);
 
+    const hoy = DateUtils.toDateOnly(DateUtils.getTodayDateOnly());
     if (!fechaReserva) {
       throw new Error('fechaReserva invalida. Se esperaba formato yyyy-MM-dd');
     }
@@ -139,14 +140,22 @@ export class BloqueoPlannerService {
       });
     }
 
+    let listoTienda = await this.calendarioLaboralService.restarDiasHabiles(
+      fechaReserva,
+      1,
+    );
+
+    if (listoTienda < hoy) {
+      listoTienda =
+        await this.calendarioLaboralService.primerDiaHabilEnRangoInclusive(
+          hoy,
+          fechaReserva,
+        );
+    }
     rangos.push({
       tipoBloqueo: TipoBloqueo.LISTO_TIENDA,
-      inicio: DateUtils.formatDateOnly(
-        await this.calendarioLaboralService.restarDiasHabiles(fechaReserva, 1),
-      ),
-      fin: DateUtils.formatDateOnly(
-        await this.calendarioLaboralService.restarDiasHabiles(fechaReserva, 1),
-      ),
+      inicio: DateUtils.formatDateOnly(listoTienda),
+      fin: DateUtils.formatDateOnly(listoTienda),
       cancelableManual: false,
     });
 
@@ -207,12 +216,20 @@ export class BloqueoPlannerService {
     if (!fechaReserva) {
       throw new Error('fechaReserva invalida. Se esperaba formato yyyy-MM-dd');
     }
+    const fechaReservaKey = DateUtils.formatDateOnly(fechaReserva);
 
-    const reservaRango = ideal.find((r) => r.tipoBloqueo === TipoBloqueo.RESERVA);
+    const reservaRango = ideal.find(
+      (r) => r.tipoBloqueo === TipoBloqueo.RESERVA,
+    );
+
+    if (!reservaRango) throw new Error('Plan ideal sin bloqueo de reserva');
+
     const lavanderiaRangos = ideal.filter(
       (r) => r.tipoBloqueo === TipoBloqueo.LAVANDERIA,
     );
-    const modistaIdeal = ideal.find((r) => r.tipoBloqueo === TipoBloqueo.MODISTA);
+    const modistaIdeal = ideal.find(
+      (r) => r.tipoBloqueo === TipoBloqueo.MODISTA,
+    );
     const medicionIdeal = ideal.find(
       (r) => r.tipoBloqueo === TipoBloqueo.MEDICION,
     );
@@ -224,87 +241,54 @@ export class BloqueoPlannerService {
       hoy,
       fechaReservaIso,
     );
+    //[9,10]
 
-    let spanMod = modistaIdeal
+    const spanModIdeal = modistaIdeal
       ? await this.contarDiasHabilesEnRango(
           modistaIdeal.inicio,
           modistaIdeal.fin,
         )
       : 0;
-    let spanMed = medicionIdeal
+    //1 dia [9]
+    const spanMedIdeal = medicionIdeal
       ? await this.contarDiasHabilesEnRango(
           medicionIdeal.inicio,
           medicionIdeal.fin,
         )
       : 0;
+    //2 [7,8]
 
-    while (spanMed + spanMod > dias.length) {
-      if (spanMod > 1) {
-        spanMod--;
-        continue;
-      }
-      if (spanMed > 0) {
-        spanMed = 0;
-        continue;
-      }
-      if (spanMod > 0) {
-        spanMod = 0;
-        continue;
-      }
-      break;
-    }
+    // Comprimir spans hasta que entren en los días disponibles
+    const [spanMed, spanMod] = this.comprimirSpans(
+      spanMedIdeal,
+      spanModIdeal,
+      dias.length,
+    );
 
-    if (spanMed + spanMod > dias.length) {
-      throw new BadRequestException(
-        'No hay dias habiles suficientes entre hoy y la fecha de reserva para los bloqueos previos.',
-      );
-    }
+    // Construir bloqueos previos según escenario
+    const previos: RangoPlanificado[] = [
+      this.construirBloqueo(
+        TipoBloqueo.MEDICION,
+        spanMed,
+        0,
+        dias,
+        fechaReservaKey,
+      ),
+      this.construirBloqueo(
+        TipoBloqueo.MODISTA,
+        spanMod,
+        spanMed,
+        dias,
+        fechaReservaKey,
+        spanMed,
+      ),
+    ];
 
-    const previos: RangoPlanificado[] = [];
-    let offset = 0;
-
-    if (spanMed > 0) {
-      const slice = dias.slice(offset, offset + spanMed);
-      offset += spanMed;
-      previos.push({
-        tipoBloqueo: TipoBloqueo.MEDICION,
-        inicio: slice[0],
-        fin: slice[slice.length - 1],
-        cancelableManual: true,
-      });
-    }
-
-    if (spanMod > 0) {
-      const slice = dias.slice(offset, offset + spanMod);
-      offset += spanMod;
-      previos.push({
-        tipoBloqueo: TipoBloqueo.MODISTA,
-        inicio: slice[0],
-        fin: slice[slice.length - 1],
-        cancelableManual: true,
-      });
-    }
-
+    console.log('listoIdeal', listoIdeal);
+    // Agregar LISTO_TIENDA si corresponde
     if (listoIdeal) {
-      const diaListo = DateUtils.formatDateOnly(
-        await this.calendarioLaboralService.restarDiasHabiles(fechaReserva, 1),
-      );
-      const fechaReservaKey = DateUtils.formatDateOnly(fechaReserva);
-      const assigned = new Set<string>();
-      for (const p of previos) {
-        const enRango = await this.listarDiasHabilesEnRangoInclusive(
-          p.inicio,
-          p.fin,
-        );
-        for (const d of enRango) {
-          assigned.add(d);
-        }
-      }
-      if (
-        diaListo >= hoy &&
-        diaListo < fechaReservaKey &&
-        !assigned.has(diaListo)
-      ) {
+      const diaListo = listoIdeal.inicio;
+      if (diaListo >= hoy && diaListo <= fechaReservaKey) {
         previos.push({
           tipoBloqueo: TipoBloqueo.LISTO_TIENDA,
           inicio: diaListo,
@@ -312,10 +296,6 @@ export class BloqueoPlannerService {
           cancelableManual: false,
         });
       }
-    }
-
-    if (!reservaRango) {
-      throw new Error('Plan ideal sin bloqueo de reserva');
     }
 
     const rangos: RangoPlanificado[] = [
@@ -339,11 +319,70 @@ export class BloqueoPlannerService {
     );
   }
 
+  /**
+   * Reduce spanMed y spanMod proporcionalmente hasta que quepan
+   * en la cantidad de días disponibles.
+   */
+  private comprimirSpans(
+    spanMed: number,
+    spanMod: number,
+    diasDisponibles: number,
+  ): [number, number] {
+    while (spanMed + spanMod > diasDisponibles) {
+      if (spanMed > spanMod) {
+        spanMed--;
+      } else {
+        spanMod--;
+      }
+    }
+    return [spanMed, spanMod];
+  }
+
+  /**
+   * Construye un RangoPlanificado usando días hábiles disponibles.
+   * Si span === 0, el bloqueo cae en el mismo día que el bloqueo anterior
+   * (fallbackIndex) o en la fecha de reserva si tampoco hay anterior.
+   */
+  private construirBloqueo(
+    tipo: TipoBloqueo,
+    span: number,
+    offset: number,
+    dias: string[],
+    fechaReserva: string,
+    fallbackIndex?: number,
+  ): RangoPlanificado {
+    if (span > 0) {
+      const slice = dias.slice(offset, offset + span);
+      return {
+        tipoBloqueo: tipo,
+        inicio: slice[0],
+        fin: slice[slice.length - 1],
+        cancelableManual: true,
+      };
+    }
+
+    // Sin días propios: caer en el día del bloqueo anterior o en la fecha de reserva
+    const diaFallback =
+      fallbackIndex !== undefined && dias[fallbackIndex - 1]
+        ? dias[fallbackIndex - 1] // mismo día que medición (caso 1 día disponible)
+        : fechaReserva; // mismo día que la reserva (caso 0 días disponibles)
+
+    return {
+      tipoBloqueo: tipo,
+      inicio: diaFallback,
+      fin: diaFallback,
+      cancelableManual: true,
+    };
+  }
+
   private async contarDiasHabilesEnRango(
     inicioStr: string,
     finStr: string,
   ): Promise<number> {
-    const lista = await this.listarDiasHabilesEnRangoInclusive(inicioStr, finStr);
+    const lista = await this.listarDiasHabilesEnRangoInclusive(
+      inicioStr,
+      finStr,
+    );
     return lista.length;
   }
 
@@ -380,6 +419,8 @@ export class BloqueoPlannerService {
         out.push(DateUtils.formatDateOnly(d));
       }
     }
+    console.log('listarDiasHabilesEnRangoInclusive', out);
+
     return out;
   }
 

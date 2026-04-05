@@ -24,6 +24,7 @@ import { Pantalon } from 'src/modules/pantalones/entity/pantalon.entity';
 import { AsignacionServicioReserva } from 'src/modules/reservas/entity/asignacion-servicio-reserva.entity';
 import { Reserva } from 'src/modules/reservas/entity/reserva.entity';
 import { Saco } from 'src/modules/sacos/entity/saco.entity';
+import { User } from 'src/user/user.entity';
 import { DateUtils } from 'src/utils/date_utils';
 import { DataSource, EntityManager, In, Not, Repository } from 'typeorm';
 import { AccionTareaOperativaDto } from '../dto/accion-tarea-operativa.dto';
@@ -316,7 +317,9 @@ export class TareasOperativasService {
     const tarea = await this.obtenerTarea(tareaId);
     tarea.estado = estado;
     tarea.resueltoPor =
-      estado === EstadoTareaOperativa.COMPLETADA ? (usuarioId ?? null) : null;
+      estado === EstadoTareaOperativa.COMPLETADA
+        ? ({ id: usuarioId } as User)
+        : null;
     tarea.metadataJson = {
       ...(tarea.metadataJson ?? {}),
       ultimoCambioEstadoMotivo: motivo ?? null,
@@ -532,7 +535,7 @@ export class TareasOperativasService {
       },
     );
     tarea.estado = EstadoTareaOperativa.COMPLETADA;
-    tarea.resueltoPor = usuarioId;
+    tarea.resueltoPor = usuarioId ? ({ id: usuarioId } as User) : null;
     tarea.metadataJson = {
       ...(tarea.metadataJson ?? {}),
       recibidoLavanderiaAt: new Date().toISOString(),
@@ -577,7 +580,7 @@ export class TareasOperativasService {
       },
     );
     tarea.estado = EstadoTareaOperativa.COMPLETADA;
-    tarea.resueltoPor = usuarioId;
+    tarea.resueltoPor = usuarioId ? ({ id: usuarioId } as User) : null;
     tarea.metadataJson = {
       ...(tarea.metadataJson ?? {}),
       recibidoModistaAt: new Date().toISOString(),
@@ -675,7 +678,6 @@ export class TareasOperativasService {
         fechaHoraCita: fechaCita,
         estado: EstadoAgendaMedicion.PROGRAMADA,
         observaciones: dto.observaciones?.trim() ?? null,
-        creadoPor: dto.usuarioId ?? null,
       });
       const agendaGuardada = await manager
         .getRepository(AgendaMedicion)
@@ -779,7 +781,9 @@ export class TareasOperativasService {
         continue;
       }
       tareaContacto.estado = EstadoTareaOperativa.COMPLETADA;
-      tareaContacto.resueltoPor = usuarioId ?? null;
+      tareaContacto.resueltoPor = usuarioId
+        ? ({ id: usuarioId } as User)
+        : null;
       tareaContacto.metadataJson = {
         ...(tareaContacto.metadataJson ?? {}),
         medicionesRegistradasAt: ahoraIso,
@@ -949,7 +953,7 @@ export class TareasOperativasService {
       });
       if (tarea && tarea.estado !== EstadoTareaOperativa.COMPLETADA) {
         tarea.estado = EstadoTareaOperativa.COMPLETADA;
-        tarea.resueltoPor = usuarioId ?? null;
+        tarea.resueltoPor = usuarioId ? ({ id: usuarioId } as User) : null;
         tarea.metadataJson = {
           ...(tarea.metadataJson ?? {}),
           omitidoLavanderia: true,
@@ -1089,7 +1093,7 @@ export class TareasOperativasService {
       });
       if (tarea && tarea.estado !== EstadoTareaOperativa.COMPLETADA) {
         tarea.estado = EstadoTareaOperativa.COMPLETADA;
-        tarea.resueltoPor = usuarioId ?? null;
+        tarea.resueltoPor = usuarioId ? ({ id: usuarioId } as User) : null;
         tarea.metadataJson = {
           ...(tarea.metadataJson ?? {}),
           omitidoModista: true,
@@ -1154,16 +1158,16 @@ export class TareasOperativasService {
     const hoyKey = DateUtils.getTodayDateOnly();
     const reservas = await this.reservaRepository.find({
       where: {
-        estadoReserva: Not(EstadoReserva.CANCELADA),
+        estadoReserva: In([
+          EstadoReserva.CONFIRMADA,
+          EstadoReserva.LISTO_PARA_ENTREGAR,
+        ]),
       },
       relations: ['saco', 'pantalon'],
       order: { fechaReserva: 'ASC' },
     });
 
     for (const reserva of reservas) {
-      if (reserva.estadoReserva !== EstadoReserva.CONFIRMADA) {
-        continue;
-      }
       const rangos = await this.bloqueoPlannerService.obtenerRangosPlanificados(
         reserva.fechaReserva,
         reserva.requiereModista,
@@ -1178,10 +1182,6 @@ export class TareasOperativasService {
         new Date(`${hoyKey}T00:00:00`),
       );
 
-      if (dias < 0 || dias > 10) {
-        continue;
-      }
-
       const existente = await this.tareaRepository.findOne({
         where: {
           tipoTarea: TipoTareaOperativa.CONTACTAR_MEDICION,
@@ -1191,35 +1191,51 @@ export class TareasOperativasService {
         relations: ['reserva'],
       });
 
-      const prioridad = this.calcularPrioridadPorDias(dias);
-
-      if (existente) {
-        existente.prioridad = prioridad;
-        existente.fechaObjetivoDesde = rangoMedicion.inicio;
-        existente.fechaObjetivoHasta = rangoMedicion.fin;
-        await this.tareaRepository.save(existente);
-        continue;
-      }
-
-      await this.tareaRepository.save(
-        this.tareaRepository.create({
-          tipoTarea: TipoTareaOperativa.CONTACTAR_MEDICION,
-          estado: EstadoTareaOperativa.PENDIENTE,
-          prioridad,
-          reserva,
-          tipoPrenda: null,
-          saco: null,
-          pantalon: null,
-          clienteNombre: reserva.clienteNombre,
-          clienteTelefono: reserva.clienteTelefono,
-          fechaObjetivoDesde: rangoMedicion.inicio,
-          fechaObjetivoHasta: rangoMedicion.fin,
-          metadataJson: {
-            fechaReserva: reserva.fechaReserva,
-          },
-        }),
-      );
+      if (!existente) continue;
+      existente.prioridad = this.calcularPrioridadPorDias(dias);
+      await this.tareaRepository.save(existente);
     }
+  }
+
+  public async crearTareaContactoMedicion(
+    reserva: Reserva,
+    manager?: EntityManager,
+    usuarioId?: string,
+  ): Promise<void> {
+    const hoyKey = DateUtils.getTodayDateOnly();
+    const repoTarea = manager
+      ? manager.getRepository(TareaOperativa)
+      : this.tareaRepository;
+
+    let bloqueoMedicion = reserva.bloqueos.find(
+      (bloqueo) => bloqueo.tipoBloqueo === TipoBloqueo.MEDICION,
+    );
+    if (!bloqueoMedicion) return;
+
+    const dias = differenceInCalendarDays(
+      new Date(`${bloqueoMedicion.inicio}T00:00:00`),
+      new Date(`${hoyKey}T00:00:00`),
+    );
+
+    await repoTarea.save(
+      this.tareaRepository.create({
+        tipoTarea: TipoTareaOperativa.CONTACTAR_MEDICION,
+        estado: EstadoTareaOperativa.PENDIENTE,
+        prioridad: this.calcularPrioridadPorDias(dias),
+        reserva,
+        tipoPrenda: null,
+        saco: null,
+        pantalon: null,
+        clienteNombre: reserva.clienteNombre,
+        clienteTelefono: reserva.clienteTelefono,
+        fechaObjetivoDesde: bloqueoMedicion.inicio,
+        fechaObjetivoHasta: bloqueoMedicion.fin,
+        creadoPor: usuarioId ? ({ id: usuarioId } as User) : null,
+        metadataJson: {
+          fechaReserva: reserva.fechaReserva,
+        },
+      }),
+    );
   }
 
   private async crearTareaLavanderiaPorPrenda(
@@ -1271,7 +1287,8 @@ export class TareasOperativasService {
         clienteTelefono: args.reserva.clienteTelefono,
         fechaObjetivoDesde: DateUtils.getTodayDateOnly(),
         fechaObjetivoHasta: null,
-        creadoPor: args.usuarioId,
+        creadoPor: args.usuarioId ? ({ id: args.usuarioId } as User) : null,
+        resueltoPor: null,
         metadataJson: {
           reservaId: args.reserva.id,
           motivo: 'Post devolucion cliente',
@@ -1329,7 +1346,8 @@ export class TareasOperativasService {
         clienteTelefono: args.reserva.clienteTelefono,
         fechaObjetivoDesde: DateUtils.getTodayDateOnly(),
         fechaObjetivoHasta: null,
-        creadoPor: args.usuarioId,
+        creadoPor: args.usuarioId ? ({ id: args.usuarioId } as User) : null,
+        resueltoPor: null,
         metadataJson: {
           reservaId: args.reserva.id,
           motivo: 'Post mediciones registradas',

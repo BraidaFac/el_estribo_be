@@ -5,13 +5,14 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { TareasOperativasService } from 'src/modules/tareas-operativas/service/tareas-operativas.service';
+import { User } from 'src/user/user.entity';
 import { DataSource, Repository } from 'typeorm';
 import { GuardarMedicionesReservaDto } from '../dto/guardar-mediciones-reserva.dto';
 import { MedicionReserva } from '../entity/medicion-reserva.entity';
 import { Reserva } from '../entity/reserva.entity';
 import {
-  medicionesReservaVacias,
   MedicionesReservaJson,
+  medicionesReservaVacias,
   type MedidasPantalonJson,
   type MedidasSacoJson,
 } from '../types/mediciones-reserva.types';
@@ -61,7 +62,9 @@ function toNullableNumber(v: unknown): number | null {
   if (v === null || v === undefined || v === '') return null;
   const n = typeof v === 'number' ? v : Number(v);
   if (Number.isNaN(n)) {
-    throw new BadRequestException('Las medidas deben ser numeros validos o vacias');
+    throw new BadRequestException(
+      'Las medidas deben ser numeros validos o vacias',
+    );
   }
   return n;
 }
@@ -110,6 +113,7 @@ export class MedicionesReservaService {
     reservaId: number;
     mediciones: MedicionesReservaJson;
     actualizadoEn: string | null;
+    creadoPor: { id: string; name: string } | null;
   }> {
     const reserva = await this.reservaRepository.findOne({
       where: { id: reservaId },
@@ -119,18 +123,21 @@ export class MedicionesReservaService {
     }
     const row = await this.medicionRepository.findOne({
       where: { reserva: { id: reservaId } },
+      relations: ['creadoPor'],
     });
     if (!row) {
       return {
         reservaId,
         mediciones: medicionesReservaVacias(),
         actualizadoEn: null,
+        creadoPor: null,
       };
     }
     return {
       reservaId,
       mediciones: row.medicionesJson,
       actualizadoEn: fechaIsoSeguro(row.updatedAt),
+      creadoPor: row.creadoPor ? { id: row.creadoPor.id, name: row.creadoPor.name } : null,
     };
   }
 
@@ -152,8 +159,7 @@ export class MedicionesReservaService {
       pantalon: mergePantalon(mergedBase.pantalon, dto.pantalon),
     };
 
-    const creadoPor =
-      normalizarUsuarioId(dto.usuarioId) ?? normalizarUsuarioId(usuarioSub);
+    const creadoPor = normalizarUsuarioId(usuarioSub);
 
     return this.dataSource.transaction(async (manager) => {
       const reserva = await manager.getRepository(Reserva).findOne({
@@ -171,13 +177,15 @@ export class MedicionesReservaService {
       let guardado: MedicionReserva;
       if (existente) {
         existente.medicionesJson = merged;
-        existente.creadoPor = creadoPor ?? existente.creadoPor;
+        existente.creadoPor = creadoPor
+          ? ({ id: creadoPor } as User)
+          : existente.creadoPor;
         guardado = await medicionRepo.save(existente);
       } else {
         const nuevo = medicionRepo.create({
           reserva,
           medicionesJson: merged,
-          creadoPor,
+          creadoPor: creadoPor ? ({ id: creadoPor } as User) : null,
         });
         guardado = await medicionRepo.save(nuevo);
       }

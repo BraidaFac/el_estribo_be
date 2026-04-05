@@ -1,14 +1,16 @@
 import {
-  Column,
   CreateDateColumn,
   Entity,
   JoinColumn,
+  ManyToOne,
   OneToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
+  Column,
 } from 'typeorm';
 import { Reserva } from './reserva.entity';
 import { MedicionesReservaJson } from '../types/mediciones-reserva.types';
+import { User } from 'src/user/user.entity';
 
 @Entity({ name: 'mediciones_reserva' })
 export class MedicionReserva {
@@ -22,8 +24,9 @@ export class MedicionReserva {
   @Column({ name: 'mediciones_json', type: 'json' })
   medicionesJson: MedicionesReservaJson;
 
-  @Column({ name: 'creado_por', type: 'varchar', length: 80, nullable: true })
-  creadoPor: string | null;
+  @ManyToOne(() => User, { nullable: true })
+  @JoinColumn({ name: 'creado_por_user_id' })
+  creadoPor: User | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
   createdAt: Date;

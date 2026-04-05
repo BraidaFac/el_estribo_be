@@ -8,9 +8,11 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from 'src/auth/auth.guard';
+import { ReqWithUser } from 'src/auth/req-with-user.interface';
 import { ActualizarEstadoTareaDto } from '../dto/actualizar-estado-tarea.dto';
 import { AccionTareaOperativaDto } from '../dto/accion-tarea-operativa.dto';
 import { ActualizarEstadoAgendaMedicionDto } from '../dto/actualizar-estado-agenda-medicion.dto';
@@ -47,10 +49,11 @@ export class TareasOperativasController {
   async registrarEnvioLavanderiaReserva(
     @Param('reservaId', ParseIntPipe) reservaId: number,
     @Body() body: EnviarLavanderiaReservaDto,
+    @Req() req: ReqWithUser,
   ): Promise<void> {
     await this.tareasOperativasService.registrarEnvioLavanderiaPorReserva(
       reservaId,
-      body,
+      { ...body, usuarioId: req.user.sub },
     );
   }
 
@@ -59,10 +62,11 @@ export class TareasOperativasController {
   async registrarReciboLavanderiaReserva(
     @Param('reservaId', ParseIntPipe) reservaId: number,
     @Body() body: AccionTareaOperativaDto,
+    @Req() req: ReqWithUser,
   ): Promise<void> {
     await this.tareasOperativasService.registrarRecibirLavanderiaPorReserva(
       reservaId,
-      body,
+      { ...body, usuarioId: req.user.sub },
     );
   }
 
@@ -71,10 +75,11 @@ export class TareasOperativasController {
   async registrarEnvioModistaReserva(
     @Param('reservaId', ParseIntPipe) reservaId: number,
     @Body() body: EnviarModistaReservaDto,
+    @Req() req: ReqWithUser,
   ): Promise<void> {
     await this.tareasOperativasService.registrarEnvioModistaPorReserva(
       reservaId,
-      body,
+      { ...body, usuarioId: req.user.sub },
     );
   }
 
@@ -83,10 +88,11 @@ export class TareasOperativasController {
   async registrarReciboModistaReserva(
     @Param('reservaId', ParseIntPipe) reservaId: number,
     @Body() body: AccionTareaOperativaDto,
+    @Req() req: ReqWithUser,
   ): Promise<void> {
     await this.tareasOperativasService.registrarRecibirModistaPorReserva(
       reservaId,
-      body,
+      { ...body, usuarioId: req.user.sub },
     );
   }
 
@@ -106,11 +112,12 @@ export class TareasOperativasController {
   actualizarEstado(
     @Param('tareaId', ParseIntPipe) tareaId: number,
     @Body() body: ActualizarEstadoTareaDto,
+    @Req() req: ReqWithUser,
   ) {
     return this.tareasOperativasService.actualizarEstado(
       tareaId,
       body.estado,
-      body.usuarioId,
+      req.user.sub,
       body.motivo,
     );
   }
@@ -119,10 +126,11 @@ export class TareasOperativasController {
   enviarLavanderia(
     @Param('tareaId', ParseIntPipe) tareaId: number,
     @Body() body: AccionTareaOperativaDto,
+    @Req() req: ReqWithUser,
   ) {
     return this.tareasOperativasService.marcarEnviadoLavanderia(
       tareaId,
-      body.usuarioId,
+      req.user.sub,
       body.motivo,
     );
   }
@@ -131,10 +139,11 @@ export class TareasOperativasController {
   recibirLavanderia(
     @Param('tareaId', ParseIntPipe) tareaId: number,
     @Body() body: AccionTareaOperativaDto,
+    @Req() req: ReqWithUser,
   ) {
     return this.tareasOperativasService.marcarRecibidoLavanderia(
       tareaId,
-      body.usuarioId,
+      req.user.sub,
       body.motivo,
     );
   }
@@ -143,10 +152,11 @@ export class TareasOperativasController {
   enviarModista(
     @Param('tareaId', ParseIntPipe) tareaId: number,
     @Body() body: AccionTareaOperativaDto,
+    @Req() req: ReqWithUser,
   ) {
     return this.tareasOperativasService.marcarEnviadoModista(
       tareaId,
-      body.usuarioId,
+      req.user.sub,
       body.motivo,
     );
   }
@@ -155,10 +165,11 @@ export class TareasOperativasController {
   recibirModista(
     @Param('tareaId', ParseIntPipe) tareaId: number,
     @Body() body: AccionTareaOperativaDto,
+    @Req() req: ReqWithUser,
   ) {
     return this.tareasOperativasService.marcarRecibidoModista(
       tareaId,
-      body.usuarioId,
+      req.user.sub,
       body.motivo,
     );
   }

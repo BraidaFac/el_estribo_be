@@ -7,9 +7,5 @@ export class ActualizarEstadoTareaDto {
 
   @IsOptional()
   @IsString()
-  usuarioId?: string;
-
-  @IsOptional()
-  @IsString()
   motivo?: string;
 }

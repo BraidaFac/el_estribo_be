@@ -43,9 +43,6 @@ export class AgendaMedicion {
   @Column({ type: 'varchar', length: 400, nullable: true })
   observaciones: string | null;
 
-  @Column({ name: 'creado_por', type: 'varchar', length: 80, nullable: true })
-  creadoPor: string | null;
-
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
   createdAt: Date;
 

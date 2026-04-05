@@ -74,8 +74,4 @@ export class CreateControlPreEntregaDto {
   @MaxLength(600)
   motivoRechazo?: string;
 
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(120)
-  auditorNombre: string;
 }

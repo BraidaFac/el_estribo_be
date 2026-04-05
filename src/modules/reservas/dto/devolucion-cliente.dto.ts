@@ -4,13 +4,10 @@ import {
   IsInt,
   IsNumber,
   IsOptional,
-  IsString,
   Max,
-  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
-import { AccionReservaDto } from './accion-reserva.dto';
 import {
   BotonesCierresInspeccion,
   DanoGraveInspeccion,
@@ -18,6 +15,7 @@ import {
   EstadoGeneralDevolucion,
   RuedosTelasInspeccion,
 } from 'src/modules/common/enums/reservas-domain.enums';
+import { AccionReservaDto } from './accion-reserva.dto';
 
 export class RecepcionDevolucionPayloadDto {
   @IsEnum(BotonesCierresInspeccion)
@@ -56,11 +54,6 @@ export class RecepcionDevolucionPayloadDto {
 
   @IsEnum(DecisionLavadoPostDevolucion)
   decisionLavado: DecisionLavadoPostDevolucion;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(160)
-  responsableLimpiezaLocal?: string | null;
 }
 
 export class DevolucionClienteDto extends AccionReservaDto {

@@ -1,8 +1,14 @@
-import { HttpException, Injectable, Logger } from '@nestjs/common';
+import {
+  HttpException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm/dist';
 import * as bcrypt from 'bcryptjs';
 import { UserRole } from 'src/utils/user_utils';
 import { Repository } from 'typeorm';
+import { UpdateUserDto } from './update-user.dto';
 import { UserDto } from './user.dto';
 import { User } from './user.entity';
 
@@ -28,9 +34,11 @@ export class UserService {
     }
 
     const userName = (process.env.CLIENT_USERNAME ?? 'admin').trim() || 'admin';
-    const displayName = (process.env.CLIENT_ADMIN_NAME ?? 'Administrador').trim() || 'Administrador';
+    const displayName =
+      (process.env.CLIENT_ADMIN_NAME ?? 'Administrador').trim() ||
+      'Administrador';
 
-    const exists = await this.userRepository.exist({
+    const exists = await this.userRepository.exists({
       where: { userName },
     });
     if (exists) {
@@ -46,6 +54,7 @@ export class UserService {
       userName,
       password: passwordHash,
       role: UserRole.ADMIN,
+      activo: true,
     });
     await this.userRepository.save(user);
     this.logger.log(
@@ -58,18 +67,52 @@ export class UserService {
       where: { userName: username },
     });
   }
-  async createUser(user: UserDto) {
+  async findAllUsers(): Promise<User[]> {
+    return this.userRepository.find({
+      where: { activo: true },
+      order: { name: 'ASC' },
+    });
+  }
+
+  async createUser(user: UserDto): Promise<User> {
     const userFound = await this.userRepository.findOne({
       where: { userName: user.userName },
     });
     if (userFound) throw new HttpException('User already exists', 400);
-    try {
-      const newUser = this.userRepository.create(user);
-      newUser.role = UserRole.ADMIN;
-      newUser.password = bcrypt.hashSync(user.password, 10);
-      return this.userRepository.save(newUser);
-    } catch {
-      if (userFound) throw new HttpException('Server error', 500);
+    const newUser = this.userRepository.create({
+      name: user.name,
+      userName: user.userName,
+      password: bcrypt.hashSync(user.password, 10),
+      role: user.role ?? UserRole.USER,
+      activo: true,
+    });
+    return this.userRepository.save(newUser);
+  }
+
+  async updateUser(id: string, dto: UpdateUserDto): Promise<User> {
+    const user = await this.userRepository.findOne({ where: { id } });
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+
+    if (dto.name !== undefined) user.name = dto.name;
+    if (dto.userName !== undefined) {
+      const existing = await this.userRepository.findOne({
+        where: { userName: dto.userName },
+      });
+      if (existing && existing.id !== id) {
+        throw new HttpException('El nombre de usuario ya está en uso', 400);
+      }
+      user.userName = dto.userName;
     }
+    if (dto.role !== undefined) user.role = dto.role;
+    if (dto.password) user.password = bcrypt.hashSync(dto.password, 10);
+
+    return this.userRepository.save(user);
+  }
+
+  async deactivateUser(id: string): Promise<void> {
+    const user = await this.userRepository.findOne({ where: { id } });
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+    user.activo = false;
+    await this.userRepository.save(user);
   }
 }

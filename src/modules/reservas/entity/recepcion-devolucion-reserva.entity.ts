@@ -6,6 +6,7 @@ import {
   RuedosTelasInspeccion,
 } from 'src/modules/common/enums/reservas-domain.enums';
 import { Reserva } from 'src/modules/reservas/entity/reserva.entity';
+import { User } from 'src/user/user.entity';
 import {
   Column,
   CreateDateColumn,
@@ -96,14 +97,10 @@ export class RecepcionDevolucionReserva {
   })
   decisionLavado: DecisionLavadoPostDevolucion;
 
-  @Column({
-    name: 'responsable_limpieza_local',
-    type: 'varchar',
-    length: 160,
-    nullable: true,
-  })
-  responsableLimpiezaLocal: string | null;
-
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
   createdAt: Date;
+
+  @ManyToOne(() => User, { nullable: true })
+  @JoinColumn({ name: 'resuelto_por_user_id' })
+  resueltoPor: User | null;
 }

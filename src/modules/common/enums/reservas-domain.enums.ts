@@ -10,7 +10,6 @@ export enum CondicionPrenda {
 }
 
 export enum EstadoReserva {
-  PENDIENTE = 'PENDIENTE',
   CONFIRMADA = 'CONFIRMADA',
   /** Control pre-entrega aprobado; habilita retiro en el local. */
   LISTO_PARA_ENTREGAR = 'LISTO_PARA_ENTREGAR',

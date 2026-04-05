@@ -20,4 +20,9 @@ export class UpdateConfiguracionGeneralDto {
   @IsInt()
   @Min(0)
   cantidadDiasPermitidoRetiro?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  dashboardDiasProximasReservas?: number;
 }

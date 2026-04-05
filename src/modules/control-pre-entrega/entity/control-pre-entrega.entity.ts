@@ -1,5 +1,6 @@
 import { EstadoControlPreEntrega } from 'src/modules/common/enums/reservas-domain.enums';
 import { Reserva } from 'src/modules/reservas/entity/reserva.entity';
+import { User } from 'src/user/user.entity';
 import {
   Column,
   CreateDateColumn,
@@ -77,8 +78,9 @@ export class ControlPreEntrega {
   })
   motivoRechazo: string | null;
 
-  @Column({ name: 'auditor_nombre', type: 'varchar', length: 120 })
-  auditorNombre: string;
+  @ManyToOne(() => User, { nullable: true })
+  @JoinColumn({ name: 'creado_por_user_id' })
+  creadoPor: User | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
   createdAt: Date;
@@ -86,11 +88,7 @@ export class ControlPreEntrega {
   @Column({ name: 'fecha_resolucion', type: 'date', nullable: true })
   fechaResolucion: string | null;
 
-  @Column({
-    name: 'resuelto_por',
-    type: 'varchar',
-    length: 120,
-    nullable: true,
-  })
-  resueltoPor: string | null;
+  @ManyToOne(() => User, { nullable: true })
+  @JoinColumn({ name: 'resuelto_por_user_id' })
+  resueltoPor: User | null;
 }

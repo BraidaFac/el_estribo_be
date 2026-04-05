@@ -62,6 +62,31 @@ export class CalendarioLaboralService {
     return fechaCursor;
   }
 
+  /**
+   * Primer día hábil en [desde, hasta] inclusive.
+   * Si no hay ningún hábil en ese rango, devuelve `hasta` (p. ej. día de reserva).
+   */
+  async primerDiaHabilEnRangoInclusive(
+    desde: Date,
+    hasta: Date,
+  ): Promise<Date> {
+    let cursor = DateUtils.toUtcDateStart(desde);
+    const fin = DateUtils.toUtcDateStart(hasta);
+
+    if (cursor > fin) {
+      return fin;
+    }
+
+    while (cursor <= fin) {
+      if (await this.esHabil(cursor)) {
+        return cursor;
+      }
+      cursor = addDays(cursor, 1);
+    }
+
+    return fin;
+  }
+
   async listarFeriados(desde?: string, hasta?: string): Promise<Feriado[]> {
     const desdeNormalizada = desde ? DateUtils.normalizeDateOnly(desde) : null;
     const hastaNormalizada = hasta ? DateUtils.normalizeDateOnly(hasta) : null;

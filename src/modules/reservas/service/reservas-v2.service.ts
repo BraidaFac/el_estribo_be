@@ -11,10 +11,10 @@ import {
   BloqueoPlannerService,
   RangoPlanificado,
 } from 'src/modules/bloqueos/service/bloqueo-planner.service';
+import { CalendarioLaboralService } from 'src/modules/calendario-laboral/service/calendario-laboral.service';
 import {
   BotonesCierresInspeccion,
   DanoGraveInspeccion,
-  DecisionLavadoPostDevolucion,
   EstadoBloqueo,
   EstadoReserva,
   EstadoTareaOperativa,
@@ -25,7 +25,7 @@ import {
   TipoPrenda,
   TipoTareaOperativa,
 } from 'src/modules/common/enums/reservas-domain.enums';
-import { CalendarioLaboralService } from 'src/modules/calendario-laboral/service/calendario-laboral.service';
+import { ConfiguracionGeneral } from 'src/modules/configuracion-general/entity/configuracion-general.entity';
 import { ConfiguracionGeneralService } from 'src/modules/configuracion-general/service/configuracion-general.service';
 import { ControlPreEntregaService } from 'src/modules/control-pre-entrega/service/control-pre-entrega.service';
 import { Lavanderia } from 'src/modules/lavanderias/entity/lavanderia.entity';
@@ -37,6 +37,7 @@ import { Saco } from 'src/modules/sacos/entity/saco.entity';
 import { AgendaMedicion } from 'src/modules/tareas-operativas/entity/agenda-medicion.entity';
 import { TareaOperativa } from 'src/modules/tareas-operativas/entity/tarea-operativa.entity';
 import { TareasOperativasService } from 'src/modules/tareas-operativas/service/tareas-operativas.service';
+import { User } from 'src/user/user.entity';
 import { DateUtils } from 'src/utils/date_utils';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import { ActualizarReservaV2Dto } from '../dto/actualizar-reserva-v2.dto';
@@ -110,6 +111,8 @@ export class ReservasV2Service {
     private readonly movimientoPrendaRepository: Repository<MovimientoPrenda>,
     @InjectRepository(AgendaMedicion)
     private readonly agendaMedicionRepository: Repository<AgendaMedicion>,
+    @InjectRepository(ConfiguracionGeneral)
+    private readonly config: Repository<ConfiguracionGeneral>,
   ) {}
 
   async validarPreConfirmacion(input: ValidarReservaV2Dto): Promise<void> {
@@ -253,6 +256,11 @@ export class ReservasV2Service {
           'asignacionesServicio.modista',
         ],
       });
+      await this.tareasOperativasService.crearTareaContactoMedicion(
+        reservaFinal,
+        manager,
+        userId,
+      );
       return this.enriquecerReserva(reservaFinal);
     });
   }
@@ -333,6 +341,8 @@ export class ReservasV2Service {
     const items: DashboardItemDto[] = [];
     const porCategoria: Record<string, number> = {};
 
+    const config = await this.configuracionGeneralService.obtener();
+
     const bump = (cat: string) => {
       porCategoria[cat] = (porCategoria[cat] ?? 0) + 1;
     };
@@ -353,7 +363,11 @@ export class ReservasV2Service {
     for (const t of tareas) {
       const mapped = this.mapTareaDashboard(t);
       const fechaRef = this.fechaReferenciaTarea(t);
-      const urgencia = this.urgenciaDashboardDesdeFecha(fechaRef, hoy);
+      const urgencia = this.urgenciaDashboardDesdeFecha(
+        fechaRef,
+        hoy,
+        config.dashboardDiasProximasReservas,
+      );
       items.push({
         id: `tarea-${t.id}`,
         categoria: mapped.categoria,
@@ -399,7 +413,11 @@ export class ReservasV2Service {
         titulo: `Retiro en el local · ${enriched.clienteNombre}`,
         descripcion: this.resumenPrendasReservaDashboard(enriched),
         fechaReferencia: fechaRef,
-        urgencia: this.urgenciaDashboardDesdeFecha(fechaRef, hoy),
+        urgencia: this.urgenciaDashboardDesdeFecha(
+          fechaRef,
+          hoy,
+          config.dashboardDiasProximasReservas,
+        ),
         prioridad: null,
         planillaDestino: planillaPorCategoria.retiro_cliente,
         reservaId: enriched.id,
@@ -425,7 +443,11 @@ export class ReservasV2Service {
         titulo: `Devolución al local · ${enriched.clienteNombre}`,
         descripcion: this.resumenPrendasReservaDashboard(enriched),
         fechaReferencia: fechaRef,
-        urgencia: this.urgenciaDashboardDesdeFecha(fechaRef, hoy),
+        urgencia: this.urgenciaDashboardDesdeFecha(
+          fechaRef,
+          hoy,
+          config.dashboardDiasProximasReservas,
+        ),
         prioridad: null,
         planillaDestino: planillaPorCategoria.devolucion_cliente,
         reservaId: enriched.id,
@@ -454,7 +476,11 @@ export class ReservasV2Service {
         titulo: `Cita medición · ${cliente}`,
         descripcion: a.observaciones?.trim() || null,
         fechaReferencia: fechaRef,
-        urgencia: this.urgenciaDashboardDesdeFecha(fechaRef, hoy),
+        urgencia: this.urgenciaDashboardDesdeFecha(
+          fechaRef,
+          hoy,
+          config.dashboardDiasProximasReservas,
+        ),
         prioridad: null,
         planillaDestino: planillaPorCategoria.agenda_medicion,
         agendaId: a.id,
@@ -466,9 +492,11 @@ export class ReservasV2Service {
 
     this.ordenarItemsDashboard(items);
 
-    const hastaReservas7 = DateUtils.formatDateOnly(addDays(parseISO(hoy), 6));
-    const proximasReservas7Dias = (
-      await this.listarPorRango(hoy, hastaReservas7)
+    const hastaReservas = DateUtils.formatDateOnly(
+      addDays(parseISO(hoy), config.dashboardDiasProximasReservas),
+    );
+    const proximasReservas = (
+      await this.listarPorRango(hoy, hastaReservas)
     ).filter(
       (r) =>
         r.estadoReserva !== EstadoReserva.COMPLETADA &&
@@ -480,7 +508,7 @@ export class ReservasV2Service {
       resumen: this.resumenUrgenciasDashboard(items),
       porCategoria,
       items,
-      proximasReservas7Dias,
+      proximasReservas,
     };
   }
 
@@ -597,11 +625,6 @@ export class ReservasV2Service {
             recepcion.demoraDias === undefined ? null : recepcion.demoraDias,
           estadoGeneral: recepcion.estadoGeneral,
           decisionLavado: recepcion.decisionLavado,
-          responsableLimpiezaLocal:
-            recepcion.decisionLavado ===
-            DecisionLavadoPostDevolucion.LIMPIEZA_LOCAL
-              ? (recepcion.responsableLimpiezaLocal?.trim() ?? null)
-              : null,
         });
       await manager
         .getRepository(RecepcionDevolucionReserva)
@@ -688,6 +711,7 @@ export class ReservasV2Service {
         this.controlPreEntregaService.obtenerPorReservaId(reservaId),
         this.recepcionDevolucionRepository.findOne({
           where: { reserva: { id: reservaId } },
+          relations: ['resueltoPor'],
         }),
         this.construirTrazabilidadReserva(reservaId),
       ]);
@@ -717,6 +741,7 @@ export class ReservasV2Service {
         usuarioId,
         motivo,
       );
+      await this.cancelarTareasActivasDeReserva(reservaId, manager, usuarioId);
 
       const reservaActualizada = await this.obtenerReserva(reservaId, manager);
       return this.enriquecerReserva(reservaActualizada);
@@ -1030,6 +1055,35 @@ export class ReservasV2Service {
     await manager.getRepository(BloqueoPrendaEvento).save(eventos);
   }
 
+  private async cancelarTareasActivasDeReserva(
+    reservaId: number,
+    manager: EntityManager,
+    usuarioId?: string,
+  ): Promise<void> {
+    const tareasActivas = await manager
+      .getRepository(TareaOperativa)
+      .createQueryBuilder('tarea')
+      .where('tarea.reserva_id = :reservaId', { reservaId })
+      .getMany();
+
+    if (tareasActivas.length === 0) {
+      return;
+    }
+
+    const userFinal = usuarioId ? ({ id: usuarioId } as User) : null;
+
+    await manager
+      .getRepository(BloqueoPrenda)
+      .createQueryBuilder()
+      .update(TareaOperativa)
+      .set({
+        estado: EstadoTareaOperativa.CANCELADA,
+        resueltoPor: userFinal,
+      })
+      .where('reserva_id = :reservaId', { reservaId })
+      .execute();
+  }
+
   private enrichAccionPermitida(
     permitida: boolean,
     motivo: string | null = null,
@@ -1304,6 +1358,7 @@ export class ReservasV2Service {
   private urgenciaDashboardDesdeFecha(
     fechaRef: string | null,
     hoy: string,
+    proximasDias: number,
   ): DashboardUrgencia {
     if (!fechaRef) return 'SIN_FECHA';
     const fechaOnly = fechaRef.includes('T')
@@ -1314,7 +1369,7 @@ export class ReservasV2Service {
     const diff = differenceInCalendarDays(d1, d0);
     if (diff < 0) return 'VENCIDA';
     if (diff === 0) return 'HOY';
-    if (diff <= 7) return 'PROXIMA';
+    if (diff <= proximasDias) return 'PROXIMA';
     return 'FUTURA';
   }
 
@@ -1428,13 +1483,6 @@ export class ReservasV2Service {
         'No informe monto por traje nuevo si el daño grave es OK',
       );
     }
-
-    if (
-      p.decisionLavado === DecisionLavadoPostDevolucion.LIMPIEZA_LOCAL &&
-      !p.responsableLimpiezaLocal?.trim()
-    ) {
-      throw new BadRequestException('Indique el responsable de limpieza local');
-    }
   }
 
   private async construirTrazabilidadReserva(
@@ -1530,7 +1578,7 @@ export class ReservasV2Service {
         id: `evt-preentrega-${ctrl.id}`,
         categoria: 'control_pre_entrega',
         titulo: `Control pre-entrega (${ctrl.estado})`,
-        descripcion: `Auditor: ${ctrl.auditorNombre}`,
+        descripcion: ctrl.creadoPor ? `Auditor: ${ctrl.creadoPor.name}` : null,
         fecha:
           ctrl.createdAt instanceof Date
             ? ctrl.createdAt.toISOString()

@@ -12,10 +12,10 @@ import {
 } from 'src/modules/common/enums/reservas-domain.enums';
 import { Reserva } from 'src/modules/reservas/entity/reserva.entity';
 import { TareasOperativasService } from 'src/modules/tareas-operativas/service/tareas-operativas.service';
+import { User } from 'src/user/user.entity';
 import { DateUtils } from 'src/utils/date_utils';
 import { Brackets, DataSource, Repository } from 'typeorm';
 import { CreateControlPreEntregaDto } from '../dto/create-control-pre-entrega.dto';
-import { ResolverRechazoPreEntregaDto } from '../dto/resolver-rechazo-pre-entrega.dto';
 import { ControlPreEntrega } from '../entity/control-pre-entrega.entity';
 
 export type PlanillaPrepararFilaDto = {
@@ -33,7 +33,7 @@ export type RechazoPreEntregaDto = {
   fechaReserva: string;
   clienteNombre: string;
   motivoRechazo: string | null;
-  auditorNombre: string;
+  creadoPorNombre: string | null;
   estado: EstadoControlPreEntrega;
   createdAt: string;
 };
@@ -55,6 +55,7 @@ export class ControlPreEntregaService {
   ): Promise<ControlPreEntrega | null> {
     return this.controlRepository.findOne({
       where: { reserva: { id: reservaId } },
+      relations: ['creadoPor', 'resueltoPor'],
     });
   }
 
@@ -91,17 +92,15 @@ export class ControlPreEntregaService {
 
   async planillaPreparar(): Promise<PlanillaPrepararFilaDto[]> {
     const hoy = DateUtils.getTodayDateOnly();
-    const hasta = DateUtils.formatDateOnly(addDays(parseISO(`${hoy}T00:00:00`), 10));
+    const hasta = DateUtils.formatDateOnly(
+      addDays(parseISO(`${hoy}T00:00:00`), 90),
+    );
 
     const qb = this.reservaRepository
       .createQueryBuilder('r')
       .innerJoinAndSelect('r.saco', 'saco')
       .leftJoinAndSelect('r.pantalon', 'pantalon')
-      .leftJoin(
-        ControlPreEntrega,
-        'cpe',
-        'cpe.reserva_id = r.id',
-      )
+      .leftJoin(ControlPreEntrega, 'cpe', 'cpe.reserva_id = r.id')
       .where('r.estadoReserva = :est', { est: EstadoReserva.CONFIRMADA })
       .andWhere('r.fechaReserva BETWEEN :desde AND :hasta', {
         desde: hoy,
@@ -124,9 +123,10 @@ export class ControlPreEntregaService {
 
     const reservas = await qb.getMany();
     const ids = reservas.map((r) => r.id);
-    const conTareas = await this.tareasOperativasService.reservasIdsConTareasOperativasAbiertas(
-      ids,
-    );
+    const conTareas =
+      await this.tareasOperativasService.reservasIdsConTareasOperativasAbiertas(
+        ids,
+      );
 
     return reservas.map((r) => {
       const diasHastaReserva = differenceInCalendarDays(
@@ -146,7 +146,10 @@ export class ControlPreEntregaService {
     });
   }
 
-  async crear(dto: CreateControlPreEntregaDto): Promise<ControlPreEntrega> {
+  async crear(
+    dto: CreateControlPreEntregaDto,
+    userId: string,
+  ): Promise<ControlPreEntrega> {
     if (dto.estado === EstadoControlPreEntrega.RESUELTO) {
       throw new BadRequestException(
         'El resultado inicial no puede ser RESUELTO (use la planilla de rechazados)',
@@ -215,7 +218,7 @@ export class ControlPreEntregaService {
           dto.estado === EstadoControlPreEntrega.RECHAZADO
             ? dto.motivoRechazo!.trim()
             : null,
-        auditorNombre: dto.auditorNombre.trim(),
+        creadoPor: { id: userId } as User,
         fechaResolucion: null,
         resueltoPor: null,
       });
@@ -237,7 +240,7 @@ export class ControlPreEntregaService {
   async listarRechazados(): Promise<RechazoPreEntregaDto[]> {
     const rows = await this.controlRepository.find({
       where: { estado: EstadoControlPreEntrega.RECHAZADO },
-      relations: ['reserva'],
+      relations: ['reserva', 'creadoPor'],
       order: { createdAt: 'DESC' },
     });
     return rows.map((c) => ({
@@ -246,7 +249,7 @@ export class ControlPreEntregaService {
       fechaReserva: c.reserva.fechaReserva,
       clienteNombre: c.reserva.clienteNombre,
       motivoRechazo: c.motivoRechazo,
-      auditorNombre: c.auditorNombre,
+      creadoPorNombre: c.creadoPor?.name ?? null,
       estado: c.estado,
       createdAt:
         c.createdAt instanceof Date
@@ -257,7 +260,7 @@ export class ControlPreEntregaService {
 
   async resolverRechazo(
     id: number,
-    dto: ResolverRechazoPreEntregaDto,
+    userId: string,
   ): Promise<ControlPreEntrega> {
     return this.dataSource.transaction(async (manager) => {
       const row = await manager.getRepository(ControlPreEntrega).findOne({
@@ -280,7 +283,7 @@ export class ControlPreEntregaService {
 
       row.estado = EstadoControlPreEntrega.RESUELTO;
       row.fechaResolucion = DateUtils.getTodayDateOnly();
-      row.resueltoPor = dto.resueltoPor.trim();
+      row.resueltoPor = { id: userId } as User;
       await manager.getRepository(ControlPreEntrega).save(row);
 
       row.reserva.estadoReserva = EstadoReserva.LISTO_PARA_ENTREGAR;

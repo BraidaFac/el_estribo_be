@@ -55,7 +55,11 @@ import { ReservasV2Service } from './service/reservas-v2.service';
     CalendarioLaboralModule,
   ],
   controllers: [ReservasV2Controller],
-  providers: [DisponibilidadService, ReservasV2Service, MedicionesReservaService],
+  providers: [
+    DisponibilidadService,
+    ReservasV2Service,
+    MedicionesReservaService,
+  ],
   exports: [
     ReservasV2Service,
     DisponibilidadService,

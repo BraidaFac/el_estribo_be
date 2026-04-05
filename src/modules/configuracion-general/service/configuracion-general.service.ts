@@ -28,6 +28,7 @@ export class ConfiguracionGeneralService {
       diasModista: 2,
       diasTomarMediciones: 1,
       cantidadDiasPermitidoRetiro: 3,
+      dashboardDiasProximasReservas: 15,
     });
 
     return this.configuracionRepository.save(inicial);
@@ -49,6 +50,9 @@ export class ConfiguracionGeneralService {
     }
     if (dto.cantidadDiasPermitidoRetiro !== undefined) {
       actual.cantidadDiasPermitidoRetiro = dto.cantidadDiasPermitidoRetiro;
+    }
+    if (dto.dashboardDiasProximasReservas !== undefined) {
+      actual.dashboardDiasProximasReservas = dto.dashboardDiasProximasReservas;
     }
     return this.configuracionRepository.save(actual);
   }

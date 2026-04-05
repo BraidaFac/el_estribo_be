@@ -26,7 +26,7 @@ export class Reserva {
     name: 'estado_reserva',
     type: 'enum',
     enum: EstadoReserva,
-    default: EstadoReserva.PENDIENTE,
+    default: EstadoReserva.CONFIRMADA,
   })
   estadoReserva: EstadoReserva;
 
@@ -40,10 +40,7 @@ export class Reserva {
   @JoinColumn({ name: 'pantalon_id' })
   pantalon: Pantalon | null;
 
-  @OneToMany(
-    () => AsignacionServicioReserva,
-    (a) => a.reserva,
-  )
+  @OneToMany(() => AsignacionServicioReserva, (a) => a.reserva)
   asignacionesServicio: AsignacionServicioReserva[];
 
   @Column({ name: 'cliente_dni', type: 'varchar', length: 30 })
