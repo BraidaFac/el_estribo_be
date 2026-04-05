@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigType } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from './auth/auth.module';
+import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { AccesoriosModule } from './modules/accesorios/accesorios.module';
 import { ReservaExtrasModule } from './modules/reserva-extras/reserva-extras.module';
 import { BloqueosModule } from './modules/bloqueos/bloqueos.module';
@@ -51,6 +52,7 @@ import { UserModule } from './user/user.module';
     UserModule,
     AccesoriosModule,
     ReservaExtrasModule,
+    AnalyticsModule,
   ],
   controllers: [],
   providers: [],

@@ -1,7 +1,8 @@
 import {
+  ArrayMinSize,
+  IsArray,
   IsEnum,
   IsInt,
-  IsNotEmpty,
   IsOptional,
   IsString,
   Max,
@@ -9,7 +10,10 @@ import {
   Min,
   ValidateIf,
 } from 'class-validator';
-import { EstadoControlPreEntrega } from 'src/modules/common/enums/reservas-domain.enums';
+import {
+  EstadoControlPreEntrega,
+  MotivoRechazoPreEntrega,
+} from 'src/modules/common/enums/reservas-domain.enums';
 
 export class CreateControlPreEntregaDto {
   @IsInt()
@@ -69,9 +73,8 @@ export class CreateControlPreEntregaDto {
   estado: EstadoControlPreEntrega;
 
   @ValidateIf((o) => o.estado === EstadoControlPreEntrega.RECHAZADO)
-  @IsNotEmpty()
-  @IsString()
-  @MaxLength(600)
-  motivoRechazo?: string;
-
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsEnum(MotivoRechazoPreEntrega, { each: true })
+  motivosRechazo?: MotivoRechazoPreEntrega[];
 }

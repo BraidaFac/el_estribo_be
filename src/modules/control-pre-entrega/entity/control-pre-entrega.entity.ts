@@ -1,4 +1,7 @@
-import { EstadoControlPreEntrega } from 'src/modules/common/enums/reservas-domain.enums';
+import {
+  EstadoControlPreEntrega,
+  MotivoRechazoPreEntrega,
+} from 'src/modules/common/enums/reservas-domain.enums';
 import { Reserva } from 'src/modules/reservas/entity/reserva.entity';
 import { User } from 'src/user/user.entity';
 import {
@@ -70,13 +73,8 @@ export class ControlPreEntrega {
   })
   estado: EstadoControlPreEntrega;
 
-  @Column({
-    name: 'motivo_rechazo',
-    type: 'varchar',
-    length: 600,
-    nullable: true,
-  })
-  motivoRechazo: string | null;
+  @Column({ name: 'motivos_rechazo', type: 'simple-json', nullable: true })
+  motivosRechazo: MotivoRechazoPreEntrega[] | null;
 
   @ManyToOne(() => User, { nullable: true })
   @JoinColumn({ name: 'creado_por_user_id' })

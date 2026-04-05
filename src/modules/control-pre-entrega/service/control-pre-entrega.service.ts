@@ -9,6 +9,7 @@ import {
   EstadoControlPreEntrega,
   EstadoReserva,
   EstadoUbicacionPrenda,
+  MotivoRechazoPreEntrega,
 } from 'src/modules/common/enums/reservas-domain.enums';
 import { Reserva } from 'src/modules/reservas/entity/reserva.entity';
 import { TareasOperativasService } from 'src/modules/tareas-operativas/service/tareas-operativas.service';
@@ -32,7 +33,7 @@ export type RechazoPreEntregaDto = {
   reservaId: number;
   fechaReserva: string;
   clienteNombre: string;
-  motivoRechazo: string | null;
+  motivosRechazo: MotivoRechazoPreEntrega[] | null;
   creadoPorNombre: string | null;
   estado: EstadoControlPreEntrega;
   createdAt: string;
@@ -156,9 +157,9 @@ export class ControlPreEntregaService {
       );
     }
     if (dto.estado === EstadoControlPreEntrega.RECHAZADO) {
-      if (!dto.motivoRechazo?.trim()) {
+      if (!dto.motivosRechazo?.length) {
         throw new BadRequestException(
-          'Motivo de rechazo obligatorio cuando el resultado es RECHAZADO',
+          'Motivos de rechazo obligatorios cuando el resultado es RECHAZADO',
         );
       }
     }
@@ -214,9 +215,9 @@ export class ControlPreEntregaService {
         complementosScore: dto.complementosScore,
         complementosObs: dto.complementosObs?.trim() || null,
         estado: dto.estado,
-        motivoRechazo:
+        motivosRechazo:
           dto.estado === EstadoControlPreEntrega.RECHAZADO
-            ? dto.motivoRechazo!.trim()
+            ? dto.motivosRechazo!
             : null,
         creadoPor: { id: userId } as User,
         fechaResolucion: null,
@@ -248,7 +249,7 @@ export class ControlPreEntregaService {
       reservaId: c.reserva.id,
       fechaReserva: c.reserva.fechaReserva,
       clienteNombre: c.reserva.clienteNombre,
-      motivoRechazo: c.motivoRechazo,
+      motivosRechazo: c.motivosRechazo,
       creadoPorNombre: c.creadoPor?.name ?? null,
       estado: c.estado,
       createdAt:

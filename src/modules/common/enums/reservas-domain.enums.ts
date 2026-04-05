@@ -79,6 +79,16 @@ export enum EstadoAgendaMedicion {
   CANCELADA = 'CANCELADA',
 }
 
+/** Categorías de motivo de rechazo en control pre-entrega. */
+export enum MotivoRechazoPreEntrega {
+  AROMA = 'AROMA',
+  PLANCHADO = 'PLANCHADO',
+  SASTRERIA = 'SASTRERIA',
+  HIGIENE = 'HIGIENE',
+  COMPLEMENTOS = 'COMPLEMENTOS',
+  OTRO = 'OTRO',
+}
+
 /** Inspección al devolver: botones / cierres. */
 export enum BotonesCierresInspeccion {
   OK = 'OK',
