@@ -59,7 +59,7 @@ export class BloqueosService {
   ): Promise<BloqueoPrenda> {
     const bloqueo = await this.bloqueoRepository.findOne({
       where: { id: bloqueoId },
-      relations: ['reserva'],
+      relations: ['reserva', 'saco', 'pantalon'],
     });
 
     if (!bloqueo) {
@@ -100,6 +100,24 @@ export class BloqueosService {
         payloadJson: { motivoCancelacion },
       });
       await manager.getRepository(BloqueoPrendaEvento).save(evento);
+
+      if (bloqueo.tipoBloqueo === TipoBloqueo.MODISTA && bloqueo.reserva) {
+        const prendaId =
+          bloqueo.tipoPrenda === TipoPrenda.SACO
+            ? bloqueo.saco?.id
+            : bloqueo.pantalon?.id;
+
+        if (prendaId !== undefined) {
+          await this.cancelarBloquesMedicionActivosPorReservaYPrenda(
+            bloqueo.reserva.id,
+            bloqueo.tipoPrenda,
+            prendaId,
+            usuarioId,
+            `Cancelado por cancelación de bloqueo modista: ${motivoCancelacion}`,
+            manager,
+          );
+        }
+      }
     });
 
     return bloqueo;
@@ -202,6 +220,64 @@ export class BloqueosService {
           evento: 'CANCELADO_MANUAL',
           usuarioId: usuarioId ?? undefined,
           payloadJson: { motivoCancelacion: motivo, origen: 'omitir_modista' },
+        }),
+      );
+    }
+
+    await this.cancelarBloquesMedicionActivosPorReservaYPrenda(
+      reservaId,
+      tipoPrenda,
+      prendaId,
+      usuarioId,
+      motivo,
+      manager,
+    );
+  }
+
+  private async cancelarBloquesMedicionActivosPorReservaYPrenda(
+    reservaId: number,
+    tipoPrenda: TipoPrenda,
+    prendaId: number,
+    usuarioId: string | null,
+    motivo: string,
+    manager?: EntityManager,
+  ): Promise<void> {
+    const bloqueoRepo = manager
+      ? manager.getRepository(BloqueoPrenda)
+      : this.bloqueoRepository;
+    const eventoRepo = manager
+      ? manager.getRepository(BloqueoPrendaEvento)
+      : this.eventoRepository;
+
+    const qb = bloqueoRepo
+      .createQueryBuilder('b')
+      .where('b.reserva_id = :reservaId', { reservaId })
+      .andWhere('b.tipo_bloqueo = :tb', { tb: TipoBloqueo.MEDICION })
+      .andWhere('b.estado = :est', { est: EstadoBloqueo.ACTIVO })
+      .andWhere('b.cancelable_manual = :cm', { cm: true });
+
+    if (tipoPrenda === TipoPrenda.SACO) {
+      qb.andWhere('b.saco_id = :prendaId', { prendaId });
+    } else {
+      qb.andWhere('b.pantalon_id = :prendaId', { prendaId });
+    }
+
+    const bloqueos = await qb.getMany();
+    for (const bloqueo of bloqueos) {
+      bloqueo.estado = EstadoBloqueo.CANCELADO;
+      bloqueo.canceladoPor = usuarioId ?? null;
+      bloqueo.canceladoAt = new Date();
+      bloqueo.motivoCancelacion = motivo;
+      await bloqueoRepo.save(bloqueo);
+      await eventoRepo.save(
+        eventoRepo.create({
+          bloqueo,
+          evento: 'CANCELADO_MANUAL',
+          usuarioId: usuarioId ?? undefined,
+          payloadJson: {
+            motivoCancelacion: motivo,
+            origen: 'cancelacion_modista',
+          },
         }),
       );
     }

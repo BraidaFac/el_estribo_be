@@ -26,6 +26,8 @@ export type PlanillaPrepararFilaDto = {
   diasHastaReserva: number;
   tieneTareasPendientes: boolean;
   puedeIniciarPreEntrega: boolean;
+  sacocodigo: string;
+  pantalonCodigo: string | null;
 };
 
 export type RechazoPreEntregaDto = {
@@ -143,6 +145,8 @@ export class ControlPreEntregaService {
         diasHastaReserva,
         tieneTareasPendientes,
         puedeIniciarPreEntrega,
+        sacocodigo: r.saco.codigo,
+        pantalonCodigo: r.pantalon?.codigo ?? null,
       };
     });
   }

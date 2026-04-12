@@ -10,7 +10,12 @@ import {
 } from 'src/modules/common/enums/reservas-domain.enums';
 import { ConfiguracionGeneralService } from 'src/modules/configuracion-general/service/configuracion-general.service';
 import { DateUtils } from 'src/utils/date_utils';
-import { EntityManager, Repository } from 'typeorm';
+import {
+  EntityManager,
+  LessThanOrEqual,
+  MoreThanOrEqual,
+  Repository,
+} from 'typeorm';
 import { BloqueoPrendaEvento } from '../entity/bloqueo-prenda-evento.entity';
 import { BloqueoPrenda } from '../entity/bloqueo-prenda.entity';
 
@@ -53,6 +58,9 @@ export class BloqueoPlannerService {
       ? await this.obtenerRangosPlanificadosUltimoMomento(
           input.fechaReserva,
           input.requiereModista,
+          input.sacoId,
+          input.pantalonId ?? null,
+          manager,
         )
       : await this.obtenerRangosPlanificados(
           input.fechaReserva,
@@ -205,8 +213,10 @@ export class BloqueoPlannerService {
   async obtenerRangosPlanificadosUltimoMomento(
     fechaReservaIso: string,
     requiereModista: boolean,
+    sacoId?: number,
+    pantalonId?: number | null,
+    manager?: EntityManager,
   ): Promise<RangoPlanificado[]> {
-    const hoy = DateUtils.getTodayDateOnly();
     const ideal = await this.obtenerRangosPlanificados(
       fechaReservaIso,
       requiereModista,
@@ -237,11 +247,18 @@ export class BloqueoPlannerService {
       (r) => r.tipoBloqueo === TipoBloqueo.LISTO_TIENDA,
     );
 
-    const dias = await this.listarDiasHabilesDesdeHastaExclusivo(
-      hoy,
+    // Los pre-bloqueos no pueden generarse antes de disponibleDesde ni antes de hoy
+    const startDateIdeal = medicionIdeal.inicio;
+
+    const dias = await this.listarDiasHabilesSinBloqueosDesdeHastaExclusivo(
+      startDateIdeal,
       fechaReservaIso,
+      sacoId,
+      pantalonId,
+      manager,
     );
-    //[9,10]
+
+    console.log(modistaIdeal);
 
     const spanModIdeal = modistaIdeal
       ? await this.contarDiasHabilesEnRango(
@@ -249,14 +266,18 @@ export class BloqueoPlannerService {
           modistaIdeal.fin,
         )
       : 0;
-    //1 dia [9]
+
+    console.log(medicionIdeal);
+
     const spanMedIdeal = medicionIdeal
       ? await this.contarDiasHabilesEnRango(
           medicionIdeal.inicio,
           medicionIdeal.fin,
         )
       : 0;
-    //2 [7,8]
+
+    console.log(spanMedIdeal);
+    console.log(spanModIdeal);
 
     // Comprimir spans hasta que entren en los días disponibles
     const [spanMed, spanMod] = this.comprimirSpans(
@@ -264,6 +285,8 @@ export class BloqueoPlannerService {
       spanModIdeal,
       dias.length,
     );
+
+    console.log(spanMed, spanMod);
 
     // Construir bloqueos previos según escenario
     const previos: RangoPlanificado[] = [
@@ -283,16 +306,20 @@ export class BloqueoPlannerService {
         spanMed,
       ),
     ];
+    const startDateReal = previos.reduce((min, current) =>
+      current.inicio < min.inicio ? current : min,
+    ).inicio;
 
-    console.log('listoIdeal', listoIdeal);
-    // Agregar LISTO_TIENDA si corresponde
+    // LISTO_TIENDA: usar el día ideal pero sin pisar antes de startDate
     if (listoIdeal) {
       const diaListo = listoIdeal.inicio;
-      if (diaListo >= hoy && diaListo <= fechaReservaKey) {
+      const efectivoDiaListo =
+        diaListo >= startDateReal ? diaListo : startDateReal;
+      if (efectivoDiaListo <= fechaReservaKey) {
         previos.push({
           tipoBloqueo: TipoBloqueo.LISTO_TIENDA,
-          inicio: diaListo,
-          fin: diaListo,
+          inicio: efectivoDiaListo,
+          fin: efectivoDiaListo,
           cancelableManual: false,
         });
       }
@@ -328,6 +355,12 @@ export class BloqueoPlannerService {
     spanMod: number,
     diasDisponibles: number,
   ): [number, number] {
+    if (diasDisponibles === 1) {
+      return [1, 0];
+    }
+    if (diasDisponibles === 0) {
+      return [0, 0];
+    }
     while (spanMed + spanMod > diasDisponibles) {
       if (spanMed > spanMod) {
         spanMed--;
@@ -375,6 +408,23 @@ export class BloqueoPlannerService {
     };
   }
 
+  private async contarDiasHabilesSinBloqueosEnRango(
+    inicioStr: string,
+    finStr: string,
+    sacoId?: number,
+    pantalonId?: number | null,
+    manager?: EntityManager,
+  ): Promise<number> {
+    const lista = await this.listarDiasHabilesSinBloqueosEnRangoInclusive(
+      inicioStr,
+      finStr,
+      sacoId,
+      pantalonId,
+      manager,
+    );
+    return lista.length;
+  }
+
   private async contarDiasHabilesEnRango(
     inicioStr: string,
     finStr: string,
@@ -386,27 +436,46 @@ export class BloqueoPlannerService {
     return lista.length;
   }
 
-  private async listarDiasHabilesDesdeHastaExclusivo(
+  private async listarDiasHabilesSinBloqueosDesdeHastaExclusivo(
     desdeStr: string,
-    fechaReservaIso: string,
+    finStr: string,
+    sacoId?: number,
+    pantalonId?: number | null,
+    manager?: EntityManager,
   ): Promise<string[]> {
-    const fin = DateUtils.toDateOnly(fechaReservaIso);
+    const fin = DateUtils.toDateOnly(finStr);
     const desde = DateUtils.toDateOnly(desdeStr);
     if (!fin || !desde) {
       return [];
     }
     const out: string[] = [];
     for (let d = new Date(desde); d < fin; d = addDays(d, 1)) {
-      if (await this.calendarioLaboralService.esHabil(new Date(d))) {
-        out.push(DateUtils.formatDateOnly(d));
+      const fechaStr = DateUtils.formatDateOnly(d);
+      const esHabil = await this.calendarioLaboralService.esHabil(new Date(d));
+      if (!esHabil) continue;
+      if (
+        sacoId !== undefined &&
+        !(await this.esDiaLibreParaPrenda(
+          fechaStr,
+          sacoId,
+          pantalonId ?? null,
+          manager,
+        ))
+      ) {
+        continue;
       }
+      out.push(fechaStr);
     }
+
     return out;
   }
 
-  private async listarDiasHabilesEnRangoInclusive(
+  private async listarDiasHabilesSinBloqueosEnRangoInclusive(
     inicioStr: string,
     finStr: string,
+    sacoId?: number,
+    pantalonId?: number | null,
+    manager?: EntityManager,
   ): Promise<string[]> {
     const inicio = DateUtils.toDateOnly(inicioStr);
     const fin = DateUtils.toDateOnly(finStr);
@@ -415,13 +484,87 @@ export class BloqueoPlannerService {
     }
     const out: string[] = [];
     for (let d = new Date(inicio); d <= fin; d = addDays(d, 1)) {
-      if (await this.calendarioLaboralService.esHabil(new Date(d))) {
-        out.push(DateUtils.formatDateOnly(d));
+      const fechaStr = DateUtils.formatDateOnly(d);
+      const esHabil = await this.calendarioLaboralService.esHabil(new Date(d));
+      if (!esHabil) continue;
+      if (
+        sacoId !== undefined &&
+        !(await this.esDiaLibreParaPrenda(
+          fechaStr,
+          sacoId,
+          pantalonId ?? null,
+          manager,
+        ))
+      ) {
+        continue;
       }
+      out.push(fechaStr);
     }
-    console.log('listarDiasHabilesEnRangoInclusive', out);
 
     return out;
+  }
+
+  private async listarDiasHabilesEnRangoInclusive(
+    inicioStr: string,
+    finStr: string,
+  ): Promise<string[]> {
+    const hoy = DateUtils.toDateOnly(DateUtils.getTodayDateOnly());
+
+    let inicio = DateUtils.toDateOnly(inicioStr);
+    const fin = DateUtils.toDateOnly(finStr);
+    if (!inicio || !fin || inicio > fin || fin <= hoy) {
+      return [];
+    }
+
+    inicio = inicio < hoy ? hoy : inicio;
+
+    const out: string[] = [];
+    for (let d = new Date(inicio); d <= fin; d = addDays(d, 1)) {
+      const fechaStr = DateUtils.formatDateOnly(d);
+      const esHabil = await this.calendarioLaboralService.esHabil(new Date(d));
+      if (!esHabil) continue;
+      out.push(fechaStr);
+    }
+
+    return out;
+  }
+  /**
+   * Devuelve true si ni el saco ni el pantalón (si aplica) tienen un bloqueo
+   * activo que cubra la fecha dada. Excluye la fecha de la reserva (RESERVA-type)
+   * ya que ese bloqueo es el que se está creando.
+   */
+  private async esDiaLibreParaPrenda(
+    fechaStr: string,
+    sacoId: number,
+    pantalonId: number | null,
+    manager?: EntityManager,
+  ): Promise<boolean> {
+    const repo = manager
+      ? manager.getRepository(BloqueoPrenda)
+      : this.bloqueoRepository;
+
+    const sacoBlocked = await repo.existsBy({
+      tipoPrenda: TipoPrenda.SACO,
+      saco: { id: sacoId },
+      estado: EstadoBloqueo.ACTIVO,
+      inicio: LessThanOrEqual(fechaStr),
+      fin: MoreThanOrEqual(fechaStr),
+    });
+
+    if (sacoBlocked) return false;
+
+    if (pantalonId) {
+      const pantBlocked = await repo.existsBy({
+        tipoPrenda: TipoPrenda.PANTALON,
+        pantalon: { id: pantalonId },
+        estado: EstadoBloqueo.ACTIVO,
+        inicio: LessThanOrEqual(fechaStr),
+        fin: MoreThanOrEqual(fechaStr),
+      });
+      if (pantBlocked) return false;
+    }
+
+    return true;
   }
 
   private async crearBloqueosDePrenda(

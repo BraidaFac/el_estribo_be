@@ -114,6 +114,10 @@ export class MedicionesReservaService {
     mediciones: MedicionesReservaJson;
     actualizadoEn: string | null;
     creadoPor: { id: string; name: string } | null;
+    observacionSaco: string | null;
+    observacionPantalon: string | null;
+    observacionGeneral: string | null;
+    sinModista: boolean;
   }> {
     const reserva = await this.reservaRepository.findOne({
       where: { id: reservaId },
@@ -131,13 +135,23 @@ export class MedicionesReservaService {
         mediciones: medicionesReservaVacias(),
         actualizadoEn: null,
         creadoPor: null,
+        observacionSaco: null,
+        observacionPantalon: null,
+        observacionGeneral: null,
+        sinModista: false,
       };
     }
     return {
       reservaId,
       mediciones: row.medicionesJson,
       actualizadoEn: fechaIsoSeguro(row.updatedAt),
-      creadoPor: row.creadoPor ? { id: row.creadoPor.id, name: row.creadoPor.name } : null,
+      creadoPor: row.creadoPor
+        ? { id: row.creadoPor.id, name: row.creadoPor.name }
+        : null,
+      observacionSaco: row.observacionSaco,
+      observacionPantalon: row.observacionPantalon,
+      observacionGeneral: row.observacionGeneral,
+      sinModista: row.sinModista,
     };
   }
 
@@ -150,23 +164,42 @@ export class MedicionesReservaService {
     mediciones: MedicionesReservaJson;
     actualizadoEn: string;
   }> {
+    const sinModista = dto.sinModista === true;
+
     const base = await this.medicionRepository.findOne({
       where: { reserva: { id: reservaId } },
     });
     const mergedBase = base?.medicionesJson ?? medicionesReservaVacias();
-    const merged: MedicionesReservaJson = {
-      saco: mergeSaco(mergedBase.saco, dto.saco),
-      pantalon: mergePantalon(mergedBase.pantalon, dto.pantalon),
-    };
+
+    // Cuando sinModista=true las medidas numéricas quedan todas en null
+    const vacias = medicionesReservaVacias();
+    const merged: MedicionesReservaJson = sinModista
+      ? { saco: vacias.saco, pantalon: vacias.pantalon }
+      : {
+          saco: mergeSaco(mergedBase.saco, dto.saco),
+          pantalon: mergePantalon(mergedBase.pantalon, dto.pantalon),
+        };
 
     const creadoPor = normalizarUsuarioId(usuarioSub);
 
     return this.dataSource.transaction(async (manager) => {
       const reserva = await manager.getRepository(Reserva).findOne({
         where: { id: reservaId },
+        relations: ['saco', 'pantalon'],
       });
       if (!reserva) {
         throw new NotFoundException('Reserva no encontrada');
+      }
+
+      if (reserva.saco.ubicacionActual !== 'TIENDA') {
+        throw new BadRequestException(
+          `No se pueden registrar las mediciones: el saco no se encuentra físicamente en el local (ubicación actual: ${reserva.saco.ubicacionActual}).`,
+        );
+      }
+      if (reserva.pantalon && reserva.pantalon.ubicacionActual !== 'TIENDA') {
+        throw new BadRequestException(
+          `No se pueden registrar las mediciones: el pantalón no se encuentra físicamente en el local (ubicación actual: ${reserva.pantalon.ubicacionActual}).`,
+        );
       }
 
       const medicionRepo = manager.getRepository(MedicionReserva);
@@ -177,6 +210,13 @@ export class MedicionesReservaService {
       let guardado: MedicionReserva;
       if (existente) {
         existente.medicionesJson = merged;
+        existente.observacionSaco =
+          dto.observacionSaco?.trim() ?? existente.observacionSaco;
+        existente.observacionPantalon =
+          dto.observacionPantalon?.trim() ?? existente.observacionPantalon;
+        existente.observacionGeneral =
+          dto.observacionGeneral?.trim() ?? existente.observacionGeneral;
+        existente.sinModista = sinModista;
         existente.creadoPor = creadoPor
           ? ({ id: creadoPor } as User)
           : existente.creadoPor;
@@ -185,6 +225,10 @@ export class MedicionesReservaService {
         const nuevo = medicionRepo.create({
           reserva,
           medicionesJson: merged,
+          observacionSaco: dto.observacionSaco?.trim() ?? null,
+          observacionPantalon: dto.observacionPantalon?.trim() ?? null,
+          observacionGeneral: dto.observacionGeneral?.trim() ?? null,
+          sinModista,
           creadoPor: creadoPor ? ({ id: creadoPor } as User) : null,
         });
         guardado = await medicionRepo.save(nuevo);
@@ -193,6 +237,7 @@ export class MedicionesReservaService {
       await this.tareasOperativasService.aplicarEfectosPostGuardadoMediciones(
         reservaId,
         creadoPor,
+        sinModista,
         manager,
       );
 

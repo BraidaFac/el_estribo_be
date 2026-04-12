@@ -789,22 +789,17 @@ export class ReservasV2Service {
       args.requiereModista,
     );
 
-    let rangos: RangoPlanificado[];
-
-    if (args.reservaUltimoMomento) {
-      rangos =
-        await this.bloqueoPlannerService.obtenerRangosPlanificadosUltimoMomento(
-          args.fechaReserva,
-          args.requiereModista,
-        );
-      this.assertVentanaBloqueosRespetanHoy(rangos);
-    } else {
-      rangos = ideal;
-      this.assertVentanaBloqueosRespetanHoy(rangos, {
+    // Cuando el plan ideal tiene pre-bloqueos en el pasado → ofrecer último momento
+    // (solo cuando aún no estamos en modo último momento)
+    if (!args.reservaUltimoMomento) {
+      this.assertVentanaBloqueosRespetanHoy(ideal, {
         puedeUltimoMomento: true,
       });
     }
 
+    // ── LAVANDERÍA POSTERIORES (siempre hard block) ──────────────────────────
+    // Usan el plan ideal: los post-bloqueos de lavandería de la nueva reserva
+    // no pueden solaparse con nada, independientemente del modo.
     const soloPosteriores = ideal
       .filter((r) => r.tipoBloqueo === TipoBloqueo.LAVANDERIA)
       .map((r) => ({ inicio: r.inicio, fin: r.fin }));
@@ -826,26 +821,64 @@ export class ReservasV2Service {
       }
     }
 
-    const sinLavanderia = rangos
-      .filter((r) => r.tipoBloqueo !== TipoBloqueo.LAVANDERIA)
-      .map((rango) => ({
-        inicio: rango.inicio,
-        fin: rango.fin,
-      }));
+    // ── BLOQUEO DÍA DEL EVENTO (siempre hard block) ──────────────────────────
+    // El día del evento en sí no puede estar bloqueado por ningún motivo.
+    const bloqueReservaDia = ideal.find(
+      (r) => r.tipoBloqueo === TipoBloqueo.RESERVA,
+    );
 
-    const sacoBloqueado =
-      await this.disponibilidadService.existeSolapamientoEnRangos(
-        TipoPrenda.SACO,
-        args.sacoId,
-        sinLavanderia,
-        { manager, lockForUpdate },
-      );
-    if (sacoBloqueado) {
-      throw new BadRequestException(
-        'El saco no se encuentra disponible en la ventana de bloqueos requerida',
-      );
+    if (bloqueReservaDia) {
+      const sacoEventoBloqueado =
+        await this.disponibilidadService.existeSolapamientoEnRangos(
+          TipoPrenda.SACO,
+          args.sacoId,
+          [{ inicio: bloqueReservaDia.inicio, fin: bloqueReservaDia.fin }],
+          { manager, lockForUpdate },
+        );
+      if (sacoEventoBloqueado) {
+        throw new BadRequestException(
+          'El saco no se encuentra disponible en la fecha de la reserva',
+        );
+      }
     }
 
+    // ── PRE-BLOQUEOS (MEDICION, MODISTA, LISTO_TIENDA) ──────────────────────
+    // Conflicto = el traje está en lavandería de una reserva anterior.
+    // No es un bloqueo duro: las tareas se pueden comprimir en los días libres
+    // que quedan entre la devolución del traje y el evento.
+    //
+    // Si !ultimoMomento → informar al FE con puedeUltimoMomento=true.
+    // Si ultimoMomento  → saltar la validación; el planner ya generará los
+    //   bloques a partir de disponibleDesde (ver crearReserva).
+
+    if (!args.reservaUltimoMomento) {
+      const preBloques = ideal
+        .filter(
+          (r) =>
+            r.tipoBloqueo !== TipoBloqueo.LAVANDERIA &&
+            r.tipoBloqueo !== TipoBloqueo.RESERVA,
+        )
+        .map(({ inicio, fin }) => ({ inicio, fin }));
+
+      if (preBloques.length > 0) {
+        const sacoPrebloqueado =
+          await this.disponibilidadService.existeSolapamientoEnRangos(
+            TipoPrenda.SACO,
+            args.sacoId,
+            preBloques,
+            { manager, lockForUpdate },
+          );
+        if (sacoPrebloqueado) {
+          throw new BadRequestException({
+            message:
+              'El saco no se encuentra disponible en la ventana de bloqueos requerida',
+            puedeUltimoMomento: true,
+          });
+        }
+      }
+    }
+
+    // ── PANTALON ─────────────────────────────────────────────────────────────
     if (!args.pantalonId) {
       return;
     }
@@ -867,19 +900,55 @@ export class ReservasV2Service {
       }
     }
 
-    const pantalonBloqueado =
-      await this.disponibilidadService.existeSolapamientoEnRangos(
-        TipoPrenda.PANTALON,
-        args.pantalonId,
-        sinLavanderia,
-        { manager, lockForUpdate },
-      );
-    if (pantalonBloqueado) {
-      throw new BadRequestException(
-        'El pantalon no se encuentra disponible en la ventana de bloqueos requerida',
-      );
+    if (bloqueReservaDia) {
+      const pantEventoBloqueado =
+        await this.disponibilidadService.existeSolapamientoEnRangos(
+          TipoPrenda.PANTALON,
+          args.pantalonId,
+          [{ inicio: bloqueReservaDia.inicio, fin: bloqueReservaDia.fin }],
+          { manager, lockForUpdate },
+        );
+      if (pantEventoBloqueado) {
+        throw new BadRequestException(
+          'El pantalon no se encuentra disponible en la fecha de la reserva',
+        );
+      }
+    }
+
+    if (!args.reservaUltimoMomento) {
+      const preBloquesPant = ideal
+        .filter(
+          (r) =>
+            r.tipoBloqueo !== TipoBloqueo.LAVANDERIA &&
+            r.tipoBloqueo !== TipoBloqueo.RESERVA,
+        )
+        .map(({ inicio, fin }) => ({ inicio, fin }));
+
+      if (preBloquesPant.length > 0) {
+        const pantPrebloqueado =
+          await this.disponibilidadService.existeSolapamientoEnRangos(
+            TipoPrenda.PANTALON,
+            args.pantalonId,
+            preBloquesPant,
+            { manager, lockForUpdate },
+          );
+        if (pantPrebloqueado) {
+          throw new BadRequestException({
+            message:
+              'El pantalon no se encuentra disponible en la ventana de bloqueos requerida',
+            puedeUltimoMomento: true,
+          });
+        }
+      }
     }
   }
+
+  /**
+   * Cuando se está creando en modo último momento, devuelve el primer día
+   * en que el traje estará disponible (día siguiente al fin del último bloqueo
+   * activo existente). El planner usará esta fecha como inicio para los pre-bloqueos
+   * de la nueva reserva, evitando solapar con la lavandería anterior.
+   */
 
   private async bloquearPrendaEnTransaccion(
     manager: EntityManager,
@@ -1185,6 +1254,7 @@ export class ReservasV2Service {
         'Solo se pueden devolver reservas en curso',
       );
     }
+    return;
     const motivoVentana = this.getMotivoVentanaDevolucion(reserva);
     if (motivoVentana) {
       throw new BadRequestException(motivoVentana);

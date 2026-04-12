@@ -7,6 +7,7 @@ import { Modista } from '../modistas/entity/modista.entity';
 import { Pantalon } from '../pantalones/entity/pantalon.entity';
 import { OperacionesPrendaModule } from '../operaciones-prenda/operaciones-prenda.module';
 import { AsignacionServicioReserva } from '../reservas/entity/asignacion-servicio-reserva.entity';
+import { RecepcionDevolucionReserva } from '../reservas/entity/recepcion-devolucion-reserva.entity';
 import { Reserva } from '../reservas/entity/reserva.entity';
 import { Saco } from '../sacos/entity/saco.entity';
 import { TareasOperativasController } from './controller/tareas-operativas.controller';
@@ -25,6 +26,7 @@ import { TareasOperativasService } from './service/tareas-operativas.service';
       Pantalon,
       Lavanderia,
       Modista,
+      RecepcionDevolucionReserva,
     ]),
     AuthModule,
     BloqueosModule,

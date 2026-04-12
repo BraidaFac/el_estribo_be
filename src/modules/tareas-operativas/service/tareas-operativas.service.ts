@@ -8,6 +8,7 @@ import { differenceInCalendarDays } from 'date-fns';
 import { BloqueoPlannerService } from 'src/modules/bloqueos/service/bloqueo-planner.service';
 import { BloqueosService } from 'src/modules/bloqueos/service/bloqueos.service';
 import {
+  DecisionLavadoPostDevolucion,
   EstadoAgendaMedicion,
   EstadoReserva,
   EstadoTareaOperativa,
@@ -22,17 +23,37 @@ import { Modista } from 'src/modules/modistas/entity/modista.entity';
 import { OperacionesPrendaService } from 'src/modules/operaciones-prenda/service/operaciones-prenda.service';
 import { Pantalon } from 'src/modules/pantalones/entity/pantalon.entity';
 import { AsignacionServicioReserva } from 'src/modules/reservas/entity/asignacion-servicio-reserva.entity';
+import { RecepcionDevolucionReserva } from 'src/modules/reservas/entity/recepcion-devolucion-reserva.entity';
 import { Reserva } from 'src/modules/reservas/entity/reserva.entity';
 import { Saco } from 'src/modules/sacos/entity/saco.entity';
 import { User } from 'src/user/user.entity';
 import { DateUtils } from 'src/utils/date_utils';
 import { DataSource, EntityManager, In, Not, Repository } from 'typeorm';
 import { AccionTareaOperativaDto } from '../dto/accion-tarea-operativa.dto';
+import { EnviarLavanderiaLoteDto } from '../dto/enviar-lavanderia-lote.dto';
 import { EnviarLavanderiaReservaDto } from '../dto/enviar-lavanderia-reserva.dto';
 import { EnviarModistaReservaDto } from '../dto/enviar-modista-reserva.dto';
 import { ProgramarMedicionDto } from '../dto/programar-medicion.dto';
+import { RetirarLavanderiaLoteDto } from '../dto/retirar-lavanderia-lote.dto';
+import { RecibirModistaDto } from '../dto/recibir-modista.dto';
 import { AgendaMedicion } from '../entity/agenda-medicion.entity';
 import { TareaOperativa } from '../entity/tarea-operativa.entity';
+
+export type TareaLavanderiaItemDto = {
+  id: number;
+  tipoPrenda: TipoPrenda | null;
+  codigoPrenda: string | null;
+  reservaId: number | null;
+  clienteNombre: string | null;
+  decisionLavado: DecisionLavadoPostDevolucion | null;
+  proximaReservaFecha: string | null;
+  prioridad: PrioridadTareaOperativa;
+  lavanderiaId: number | null;
+  lavanderiaNombre: string | null;
+  fechaIngresoLavanderia: string | null;
+  fechaRetiroLavanderia: string | null;
+  estado: EstadoTareaOperativa;
+};
 
 @Injectable()
 export class TareasOperativasService {
@@ -49,6 +70,10 @@ export class TareasOperativasService {
     private readonly sacoRepository: Repository<Saco>,
     @InjectRepository(Pantalon)
     private readonly pantalonRepository: Repository<Pantalon>,
+    @InjectRepository(Lavanderia)
+    private readonly lavanderiaRepository: Repository<Lavanderia>,
+    @InjectRepository(RecepcionDevolucionReserva)
+    private readonly recepcionRepository: Repository<RecepcionDevolucionReserva>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
     private readonly bloqueoPlannerService: BloqueoPlannerService,
@@ -68,6 +93,7 @@ export class TareasOperativasService {
       .createQueryBuilder('tarea')
       .leftJoinAndSelect('tarea.reserva', 'reserva')
       .leftJoinAndSelect('reserva.pantalon', 'reservaPantalon')
+      .leftJoinAndSelect('reserva.saco', 'reservaSaco')
       .leftJoinAndSelect('tarea.saco', 'saco')
       .leftJoinAndSelect('tarea.pantalon', 'pantalon')
       .where('1=1');
@@ -345,6 +371,17 @@ export class TareasOperativasService {
         throw new BadRequestException('La tarea no tiene prenda asociada');
       }
 
+      const ubicActualLav =
+        tarea.tipoPrenda === TipoPrenda.SACO
+          ? tarea.saco?.ubicacionActual
+          : tarea.pantalon?.ubicacionActual;
+      if (!ubicActualLav) {
+        throw new BadRequestException(
+          'No se puede determinar la ubicación de la prenda',
+        );
+      }
+      this.assertPrendaEnTienda(ubicActualLav, tarea.tipoPrenda);
+
       await this.operacionesPrendaService.actualizarUbicacion(
         tarea.tipoPrenda,
         tarea.tipoPrenda === TipoPrenda.SACO
@@ -435,6 +472,18 @@ export class TareasOperativasService {
       if (!tarea.tipoPrenda) {
         throw new BadRequestException('La tarea no tiene prenda asociada');
       }
+
+      const ubicActualMod =
+        tarea.tipoPrenda === TipoPrenda.SACO
+          ? tarea.saco?.ubicacionActual
+          : tarea.pantalon?.ubicacionActual;
+      if (!ubicActualMod) {
+        throw new BadRequestException(
+          'No se puede determinar la ubicación de la prenda',
+        );
+      }
+      this.assertPrendaEnTienda(ubicActualMod, tarea.tipoPrenda);
+
       await this.operacionesPrendaService.actualizarUbicacion(
         tarea.tipoPrenda,
         tarea.tipoPrenda === TipoPrenda.SACO
@@ -461,16 +510,16 @@ export class TareasOperativasService {
 
   async marcarRecibidoModista(
     tareaId: number,
-    usuarioId?: string,
-    motivo?: string,
+    dto: RecibirModistaDto,
   ): Promise<TareaOperativa> {
     return this.dataSource.transaction(async (manager) => {
       const tarea = await this.obtenerTareaConManager(tareaId, manager);
       await this.ejecutarReciboModistaSobreTarea(
         manager,
         tarea,
-        usuarioId ?? null,
-        motivo ?? null,
+        dto.usuarioId ?? null,
+        dto.motivo ?? null,
+        dto.costoModista,
       );
       return this.obtenerTareaConManager(tarea.id, manager);
     });
@@ -478,7 +527,7 @@ export class TareasOperativasService {
 
   async registrarRecibirModistaPorReserva(
     reservaId: number,
-    dto: AccionTareaOperativaDto,
+    dto: RecibirModistaDto,
   ): Promise<void> {
     await this.dataSource.transaction(async (manager) => {
       const repo = manager.getRepository(TareaOperativa);
@@ -501,6 +550,7 @@ export class TareasOperativasService {
           t,
           dto.usuarioId ?? null,
           dto.motivo ?? null,
+          dto.costoModista,
         );
       }
     });
@@ -556,6 +606,7 @@ export class TareasOperativasService {
     tarea: TareaOperativa,
     usuarioId: string | null,
     motivo: string | null,
+    costoModista: number | null,
   ): Promise<void> {
     if (tarea.tipoTarea !== TipoTareaOperativa.LLEVAR_MODISTA) {
       throw new BadRequestException(
@@ -581,9 +632,11 @@ export class TareasOperativasService {
     );
     tarea.estado = EstadoTareaOperativa.COMPLETADA;
     tarea.resueltoPor = usuarioId ? ({ id: usuarioId } as User) : null;
+    tarea.costoModista = costoModista;
     tarea.metadataJson = {
       ...(tarea.metadataJson ?? {}),
       recibidoModistaAt: new Date().toISOString(),
+      costoModistaRegistradoAt: new Date().toISOString(),
     };
     await manager.getRepository(TareaOperativa).save(tarea);
     if (tarea.reserva?.id) {
@@ -754,6 +807,7 @@ export class TareasOperativasService {
   async aplicarEfectosPostGuardadoMediciones(
     reservaId: number,
     usuarioId: string | null,
+    sinModista: boolean,
     manager: EntityManager,
   ): Promise<void> {
     const repoReserva = manager.getRepository(Reserva);
@@ -804,6 +858,30 @@ export class TareasOperativasService {
         ],
       })
       .execute();
+
+    if (sinModista) {
+      await this.aplicarDecisionModistaPrenda(
+        manager,
+        reserva,
+        TipoPrenda.SACO,
+        reserva.saco.id,
+        false,
+        undefined,
+        usuarioId,
+      );
+      if (reserva.pantalon) {
+        await this.aplicarDecisionModistaPrenda(
+          manager,
+          reserva,
+          TipoPrenda.PANTALON,
+          reserva.pantalon.id,
+          false,
+          undefined,
+          usuarioId,
+        );
+      }
+      return;
+    }
 
     if (!reserva.requiereModista) {
       return;
@@ -919,6 +997,318 @@ export class TareasOperativasService {
     });
   }
 
+  // ─── Planilla Lavandería ────────────────────────────────────────────────────
+
+  async listarParaLavanderia(params: {
+    tipo: 'llevar' | 'retirar';
+    lavanderiaId?: number;
+  }): Promise<TareaLavanderiaItemDto[]> {
+    const estado =
+      params.tipo === 'llevar'
+        ? EstadoTareaOperativa.PENDIENTE
+        : EstadoTareaOperativa.EN_PROCESO;
+
+    const qb = this.tareaRepository
+      .createQueryBuilder('tarea')
+      .leftJoinAndSelect('tarea.saco', 'saco')
+      .leftJoinAndSelect('tarea.pantalon', 'pantalon')
+      .leftJoinAndSelect('tarea.reserva', 'reserva')
+      .leftJoinAndSelect('tarea.lavanderia', 'lavanderia')
+      .where('tarea.tipoTarea = :tipoTarea', {
+        tipoTarea: TipoTareaOperativa.LLEVAR_LAVANDERIA,
+      })
+      .andWhere('tarea.estado = :estado', { estado });
+
+    if (params.lavanderiaId) {
+      qb.andWhere('lavanderia.id = :lavanderiaId', {
+        lavanderiaId: params.lavanderiaId,
+      });
+    }
+
+    qb.orderBy(
+      `CASE tarea.prioridad
+      WHEN '${PrioridadTareaOperativa.ALTA}' THEN 1
+      WHEN '${PrioridadTareaOperativa.MEDIA}' THEN 2
+      ELSE 3 END`,
+      'ASC',
+    ).addOrderBy('tarea.createdAt', 'ASC');
+
+    const tareas = await qb.getMany();
+    if (tareas.length === 0) return [];
+
+    // Fetch decisionLavado per reserva (post-devolución)
+    const reservaIds = [
+      ...new Set(
+        tareas
+          .map((t) => t.reserva?.id)
+          .filter((id): id is number => id != null),
+      ),
+    ];
+    const recepciones =
+      reservaIds.length > 0
+        ? await this.recepcionRepository.find({
+            where: { reserva: { id: In(reservaIds) } },
+            relations: ['reserva'],
+          })
+        : [];
+    const recepcionMap = new Map<number, DecisionLavadoPostDevolucion>();
+    for (const r of recepciones) {
+      recepcionMap.set(r.reserva.id, r.decisionLavado);
+    }
+
+    // Fetch próxima reserva por prenda
+    const hoy = DateUtils.getTodayDateOnly();
+    const sacoIds = [
+      ...new Set(tareas.filter((t) => t.saco).map((t) => t.saco!.id)),
+    ];
+    const pantalonIds = [
+      ...new Set(tareas.filter((t) => t.pantalon).map((t) => t.pantalon!.id)),
+    ];
+
+    const proximaMap = new Map<string, string>();
+
+    if (sacoIds.length > 0) {
+      const placeholders = sacoIds.map(() => '?').join(',');
+      const rows = await this.dataSource.query<
+        { fecha_reserva: string; saco_id: number }[]
+      >(
+        `SELECT fecha_reserva, saco_id FROM reservas WHERE saco_id IN (${placeholders}) AND fecha_reserva > ? AND estado_reserva = ? ORDER BY fecha_reserva ASC`,
+        [...sacoIds, hoy, EstadoReserva.CONFIRMADA],
+      );
+      for (const row of rows) {
+        const key = `S_${row.saco_id}`;
+        if (!proximaMap.has(key)) proximaMap.set(key, row.fecha_reserva);
+      }
+    }
+
+    if (pantalonIds.length > 0) {
+      const placeholders = pantalonIds.map(() => '?').join(',');
+      const rows = await this.dataSource.query<
+        { fecha_reserva: string; pantalon_id: number }[]
+      >(
+        `SELECT fecha_reserva, pantalon_id FROM reservas WHERE pantalon_id IN (${placeholders}) AND fecha_reserva > ? AND estado_reserva = ? ORDER BY fecha_reserva ASC`,
+        [...pantalonIds, hoy, EstadoReserva.CONFIRMADA],
+      );
+      for (const row of rows) {
+        const key = `P_${row.pantalon_id}`;
+        if (!proximaMap.has(key)) proximaMap.set(key, row.fecha_reserva);
+      }
+    }
+
+    return tareas.map((t) => {
+      const proximaKey =
+        t.tipoPrenda === TipoPrenda.SACO && t.saco
+          ? `S_${t.saco.id}`
+          : t.tipoPrenda === TipoPrenda.PANTALON && t.pantalon
+            ? `P_${t.pantalon.id}`
+            : null;
+
+      const fechaIngreso = t.fechaIngresoLavanderia
+        ? DateUtils.formatDateOnly(t.fechaIngresoLavanderia)
+        : null;
+      const fechaRetiro = t.fechaRetiroLavanderia
+        ? DateUtils.formatDateOnly(t.fechaRetiroLavanderia)
+        : null;
+
+      const proximaReservaFecha = proximaKey
+        ? (proximaMap.get(proximaKey) ?? null)
+        : null;
+
+      const prioridad = proximaReservaFecha
+        ? this.calcularPrioridadPorDias(
+            differenceInCalendarDays(
+              new Date(`${proximaReservaFecha}T00:00:00`),
+              new Date(`${hoy}T00:00:00`),
+            ),
+          )
+        : t.prioridad;
+
+      return {
+        id: t.id,
+        tipoPrenda: t.tipoPrenda,
+        codigoPrenda:
+          t.tipoPrenda === TipoPrenda.SACO
+            ? (t.saco?.codigo ?? null)
+            : (t.pantalon?.codigo ?? null),
+        reservaId: t.reserva?.id ?? null,
+        clienteNombre: t.clienteNombre,
+        decisionLavado: t.reserva
+          ? (recepcionMap.get(t.reserva.id) ?? null)
+          : null,
+        proximaReservaFecha,
+        prioridad,
+        lavanderiaId: t.lavanderia?.id ?? null,
+        lavanderiaNombre: t.lavanderia?.nombre ?? null,
+        fechaIngresoLavanderia: fechaIngreso,
+        fechaRetiroLavanderia: fechaRetiro,
+        estado: t.estado,
+      };
+    });
+  }
+
+  async enviarLavanderiaLote(
+    dto: EnviarLavanderiaLoteDto,
+    usuarioId: string,
+  ): Promise<void> {
+    await this.dataSource.transaction(async (manager) => {
+      const repoTarea = manager.getRepository(TareaOperativa);
+      const tareas = await repoTarea.find({
+        where: { id: In(dto.ids) },
+        relations: ['saco', 'pantalon', 'reserva'],
+      });
+
+      if (tareas.length === 0) {
+        throw new BadRequestException(
+          'No se encontraron tareas con los ids proporcionados',
+        );
+      }
+
+      const lav = await manager.getRepository(Lavanderia).findOne({
+        where: { id: dto.lavanderiaId, activo: true },
+      });
+      if (!lav) {
+        throw new BadRequestException('Lavandería no encontrada o inactiva');
+      }
+
+      const ahora = new Date();
+      for (const tarea of tareas) {
+        if (tarea.tipoTarea !== TipoTareaOperativa.LLEVAR_LAVANDERIA) {
+          throw new BadRequestException(
+            `Tarea ${tarea.id} no es de tipo LLEVAR_LAVANDERIA`,
+          );
+        }
+        if (tarea.estado !== EstadoTareaOperativa.PENDIENTE) {
+          throw new BadRequestException(
+            `Tarea ${tarea.id} no está en estado PENDIENTE`,
+          );
+        }
+        if (!tarea.tipoPrenda) {
+          throw new BadRequestException(
+            `Tarea ${tarea.id} no tiene prenda asociada`,
+          );
+        }
+
+        const ubicActual =
+          tarea.tipoPrenda === TipoPrenda.SACO
+            ? tarea.saco?.ubicacionActual
+            : tarea.pantalon?.ubicacionActual;
+        if (!ubicActual) {
+          throw new BadRequestException(
+            `Tarea ${tarea.id}: no se puede determinar la ubicación de la prenda`,
+          );
+        }
+        this.assertPrendaEnTienda(ubicActual, tarea.tipoPrenda);
+
+        await this.operacionesPrendaService.actualizarUbicacion(
+          tarea.tipoPrenda,
+          tarea.tipoPrenda === TipoPrenda.SACO
+            ? (tarea.saco?.id ?? 0)
+            : (tarea.pantalon?.id ?? 0),
+          EstadoUbicacionPrenda.EN_LAVANDERIA,
+          {
+            manager,
+            usuarioId,
+            motivo: 'Enviado a lavandería por lote',
+            reservaId: tarea.reserva?.id ?? null,
+            tareaOperativaId: tarea.id,
+          },
+        );
+
+        tarea.estado = EstadoTareaOperativa.EN_PROCESO;
+        tarea.lavanderia = lav;
+        tarea.fechaIngresoLavanderia = ahora;
+        tarea.metadataJson = {
+          ...(tarea.metadataJson ?? {}),
+          enviadoLavanderiaAt: ahora.toISOString(),
+          lavanderiaId: lav.id,
+        };
+        await repoTarea.save(tarea);
+
+        if (tarea.reserva?.id) {
+          await this.patchAsignacionServicio(
+            manager,
+            tarea.reserva.id,
+            tarea.tipoPrenda,
+            { lavanderia: lav },
+          );
+        }
+      }
+    });
+  }
+
+  async retirarLavanderiaLote(
+    dto: RetirarLavanderiaLoteDto,
+    usuarioId: string,
+  ): Promise<void> {
+    await this.dataSource.transaction(async (manager) => {
+      const repoTarea = manager.getRepository(TareaOperativa);
+      const tareas = await repoTarea.find({
+        where: { id: In(dto.ids) },
+        relations: ['saco', 'pantalon', 'reserva'],
+      });
+
+      if (tareas.length === 0) {
+        throw new BadRequestException(
+          'No se encontraron tareas con los ids proporcionados',
+        );
+      }
+
+      const ahora = new Date();
+      for (const tarea of tareas) {
+        if (tarea.tipoTarea !== TipoTareaOperativa.LLEVAR_LAVANDERIA) {
+          throw new BadRequestException(
+            `Tarea ${tarea.id} no es de tipo LLEVAR_LAVANDERIA`,
+          );
+        }
+        if (tarea.estado !== EstadoTareaOperativa.EN_PROCESO) {
+          throw new BadRequestException(
+            `Tarea ${tarea.id} no está en estado EN_PROCESO`,
+          );
+        }
+        if (!tarea.tipoPrenda) {
+          throw new BadRequestException(
+            `Tarea ${tarea.id} no tiene prenda asociada`,
+          );
+        }
+
+        await this.operacionesPrendaService.actualizarUbicacion(
+          tarea.tipoPrenda,
+          tarea.tipoPrenda === TipoPrenda.SACO
+            ? (tarea.saco?.id ?? 0)
+            : (tarea.pantalon?.id ?? 0),
+          EstadoUbicacionPrenda.TIENDA,
+          {
+            manager,
+            usuarioId,
+            motivo: 'Retirado de lavandería por lote',
+            reservaId: tarea.reserva?.id ?? null,
+            tareaOperativaId: tarea.id,
+          },
+        );
+
+        tarea.estado = EstadoTareaOperativa.COMPLETADA;
+        tarea.resueltoPor = { id: usuarioId } as User;
+        tarea.fechaRetiroLavanderia = ahora;
+        tarea.metadataJson = {
+          ...(tarea.metadataJson ?? {}),
+          recibidoLavanderiaAt: ahora.toISOString(),
+        };
+        await repoTarea.save(tarea);
+
+        if (tarea.reserva?.id) {
+          await this.patchAsignacionServicio(
+            manager,
+            tarea.reserva.id,
+            tarea.tipoPrenda,
+            { lavanderia: null },
+          );
+        }
+      }
+    });
+  }
+
+  // ────────────────────────────────────────────────────────────────────────────
+
   private async aplicarDecisionLavanderiaPrenda(
     manager: EntityManager,
     reserva: Reserva,
@@ -963,6 +1353,17 @@ export class TareasOperativasService {
       }
       return;
     }
+
+    const ubicActualDecLav =
+      tipoPrenda === TipoPrenda.SACO
+        ? reserva.saco.ubicacionActual
+        : reserva.pantalon?.ubicacionActual;
+    if (!ubicActualDecLav) {
+      throw new BadRequestException(
+        'No se puede determinar la ubicación de la prenda',
+      );
+    }
+    this.assertPrendaEnTienda(ubicActualDecLav, tipoPrenda);
 
     if (lavanderiaId == null) {
       throw new BadRequestException(
@@ -1103,6 +1504,17 @@ export class TareasOperativasService {
       }
       return;
     }
+
+    const ubicActualDecMod =
+      tipoPrenda === TipoPrenda.SACO
+        ? reserva.saco.ubicacionActual
+        : reserva.pantalon?.ubicacionActual;
+    if (!ubicActualDecMod) {
+      throw new BadRequestException(
+        'No se puede determinar la ubicación de la prenda',
+      );
+    }
+    this.assertPrendaEnTienda(ubicActualDecMod, tipoPrenda);
 
     if (modistaId == null) {
       throw new BadRequestException(
@@ -1393,9 +1805,21 @@ export class TareasOperativasService {
     return this.calcularPrioridadPorDias(dias);
   }
 
+  private assertPrendaEnTienda(
+    ubicacion: EstadoUbicacionPrenda,
+    tipoPrenda: TipoPrenda,
+  ): void {
+    if (ubicacion !== EstadoUbicacionPrenda.TIENDA) {
+      const nombre = tipoPrenda === TipoPrenda.SACO ? 'saco' : 'pantalón';
+      throw new BadRequestException(
+        `No se puede avanzar esta tarea: el ${nombre} no se encuentra físicamente en el local (ubicación actual: ${ubicacion}).`,
+      );
+    }
+  }
+
   private calcularPrioridadPorDias(dias: number): PrioridadTareaOperativa {
-    if (dias <= 3) return PrioridadTareaOperativa.ALTA;
-    if (dias <= 7) return PrioridadTareaOperativa.MEDIA;
+    if (dias <= 7) return PrioridadTareaOperativa.ALTA;
+    if (dias <= 15) return PrioridadTareaOperativa.MEDIA;
     return PrioridadTareaOperativa.BAJA;
   }
 
