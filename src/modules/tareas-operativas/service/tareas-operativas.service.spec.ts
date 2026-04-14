@@ -75,22 +75,30 @@ describe('TareasOperativasService — validación de ubicación de prenda', () =
     };
 
     mockDataSource = {
-      transaction: jest.fn().mockImplementation((cb: (m: EntityManager) => Promise<unknown>) =>
-        cb(mockManager as EntityManager),
-      ),
+      transaction: jest
+        .fn()
+        .mockImplementation((cb: (m: EntityManager) => Promise<unknown>) =>
+          cb(mockManager as EntityManager),
+        ),
     };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TareasOperativasService,
         { provide: getRepositoryToken(TareaOperativa), useValue: mockRepo() },
-        { provide: getRepositoryToken(AsignacionServicioReserva), useValue: mockRepo() },
+        {
+          provide: getRepositoryToken(AsignacionServicioReserva),
+          useValue: mockRepo(),
+        },
         { provide: getRepositoryToken(AgendaMedicion), useValue: mockRepo() },
         { provide: getRepositoryToken(Reserva), useValue: mockRepo() },
         { provide: getRepositoryToken(Saco), useValue: mockRepo() },
         { provide: getRepositoryToken(Pantalon), useValue: mockRepo() },
         { provide: DataSource, useValue: mockDataSource },
-        { provide: BloqueoPlannerService, useValue: { obtenerRangosPlanificados: jest.fn() } },
+        {
+          provide: BloqueoPlannerService,
+          useValue: { obtenerRangosPlanificados: jest.fn() },
+        },
         { provide: BloqueosService, useValue: {} },
         {
           provide: OperacionesPrendaService,
@@ -122,25 +130,34 @@ describe('TareasOperativasService — validación de ubicación de prenda', () =
       EstadoUbicacionPrenda.RETIRADO_CLIENTE,
       EstadoUbicacionPrenda.EN_MODISTA,
       EstadoUbicacionPrenda.EN_LAVANDERIA,
-    ])('lanza BadRequestException cuando el saco está en %s', async (ubicacion) => {
-      const tarea = buildTareaConSaco(ubicacion);
-      const repoMock = mockRepo<TareaOperativa>({
-        findOne: jest.fn().mockResolvedValue(tarea),
-      });
-      (mockManager.getRepository as jest.Mock).mockReturnValue(repoMock);
+    ])(
+      'lanza BadRequestException cuando el saco está en %s',
+      async (ubicacion) => {
+        const tarea = buildTareaConSaco(ubicacion);
+        const repoMock = mockRepo<TareaOperativa>({
+          findOne: jest.fn().mockResolvedValue(tarea),
+        });
+        (mockManager.getRepository as jest.Mock).mockReturnValue(repoMock);
 
-      await expect(service.marcarEnviadoLavanderia(10)).rejects.toThrow(BadRequestException);
-    });
+        await expect(service.marcarEnviadoLavanderia(10)).rejects.toThrow(
+          BadRequestException,
+        );
+      },
+    );
 
     it('lanza BadRequestException cuando el pantalón está en RETIRADO_CLIENTE', async () => {
-      const tarea = buildTareaConPantalon(EstadoUbicacionPrenda.RETIRADO_CLIENTE);
+      const tarea = buildTareaConPantalon(
+        EstadoUbicacionPrenda.RETIRADO_CLIENTE,
+      );
       tarea.tipoTarea = TipoTareaOperativa.LLEVAR_LAVANDERIA;
       const repoMock = mockRepo<TareaOperativa>({
         findOne: jest.fn().mockResolvedValue(tarea),
       });
       (mockManager.getRepository as jest.Mock).mockReturnValue(repoMock);
 
-      await expect(service.marcarEnviadoLavanderia(11)).rejects.toThrow(BadRequestException);
+      await expect(service.marcarEnviadoLavanderia(11)).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 
@@ -166,21 +183,32 @@ describe('TareasOperativasService — validación de ubicación de prenda', () =
       EstadoUbicacionPrenda.RETIRADO_CLIENTE,
       EstadoUbicacionPrenda.EN_MODISTA,
       EstadoUbicacionPrenda.EN_LAVANDERIA,
-    ])('lanza BadRequestException cuando el saco está en %s', async (ubicacion) => {
-      const tarea = buildTareaConSaco(ubicacion, TipoTareaOperativa.LLEVAR_MODISTA);
-      const repoMock = mockRepo<TareaOperativa>({
-        findOne: jest.fn().mockResolvedValue(tarea),
-      });
-      (mockManager.getRepository as jest.Mock).mockReturnValue(repoMock);
+    ])(
+      'lanza BadRequestException cuando el saco está en %s',
+      async (ubicacion) => {
+        const tarea = buildTareaConSaco(
+          ubicacion,
+          TipoTareaOperativa.LLEVAR_MODISTA,
+        );
+        const repoMock = mockRepo<TareaOperativa>({
+          findOne: jest.fn().mockResolvedValue(tarea),
+        });
+        (mockManager.getRepository as jest.Mock).mockReturnValue(repoMock);
 
-      await expect(service.marcarEnviadoModista(10)).rejects.toThrow(BadRequestException);
-    });
+        await expect(service.marcarEnviadoModista(10)).rejects.toThrow(
+          BadRequestException,
+        );
+      },
+    );
   });
 
   describe('assertPrendaEnTienda (helper privado)', () => {
     it('no lanza cuando la ubicación es TIENDA', () => {
       expect(() =>
-        (service as any).assertPrendaEnTienda(EstadoUbicacionPrenda.TIENDA, TipoPrenda.SACO),
+        (service as any).assertPrendaEnTienda(
+          EstadoUbicacionPrenda.TIENDA,
+          TipoPrenda.SACO,
+        ),
       ).not.toThrow();
     });
 
@@ -200,7 +228,9 @@ describe('TareasOperativasService — validación de ubicación de prenda', () =
           EstadoUbicacionPrenda.RETIRADO_CLIENTE,
           TipoPrenda.SACO,
         ),
-      ).toThrow(expect.objectContaining({ message: expect.stringContaining('saco') }));
+      ).toThrow(
+        expect.objectContaining({ message: expect.stringContaining('saco') }),
+      );
     });
 
     it('el mensaje menciona "pantalón" para TipoPrenda.PANTALON', () => {
@@ -209,7 +239,11 @@ describe('TareasOperativasService — validación de ubicación de prenda', () =
           EstadoUbicacionPrenda.RETIRADO_CLIENTE,
           TipoPrenda.PANTALON,
         ),
-      ).toThrow(expect.objectContaining({ message: expect.stringContaining('pantalón') }));
+      ).toThrow(
+        expect.objectContaining({
+          message: expect.stringContaining('pantalón'),
+        }),
+      );
     });
   });
 });

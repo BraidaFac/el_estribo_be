@@ -1,5 +1,12 @@
 import { Transform, Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import {
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
 
 function trimOrUndefined(value: unknown): string | undefined {
   if (value === undefined || value === null) return undefined;

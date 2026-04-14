@@ -36,7 +36,11 @@ export class CalendarioLaboralService {
 
   async sumarDiasHabiles(base: Date, cantidad: number): Promise<Date> {
     // Normalize to local-time midnight so getDay() and formatDateOnly stay consistent
-    let fechaCursor = new Date(base.getFullYear(), base.getMonth(), base.getDate());
+    let fechaCursor = new Date(
+      base.getFullYear(),
+      base.getMonth(),
+      base.getDate(),
+    );
     let restantes = Math.max(cantidad, 0);
 
     while (restantes > 0) {
@@ -51,7 +55,11 @@ export class CalendarioLaboralService {
 
   async restarDiasHabiles(base: Date, cantidad: number): Promise<Date> {
     // Normalize to local-time midnight so getDay() and formatDateOnly stay consistent
-    let fechaCursor = new Date(base.getFullYear(), base.getMonth(), base.getDate());
+    let fechaCursor = new Date(
+      base.getFullYear(),
+      base.getMonth(),
+      base.getDate(),
+    );
     let restantes = Math.max(cantidad, 0);
 
     while (restantes > 0) {
@@ -72,8 +80,16 @@ export class CalendarioLaboralService {
     desde: Date,
     hasta: Date,
   ): Promise<Date> {
-    let cursor = new Date(desde.getFullYear(), desde.getMonth(), desde.getDate());
-    const fin = new Date(hasta.getFullYear(), hasta.getMonth(), hasta.getDate());
+    let cursor = new Date(
+      desde.getFullYear(),
+      desde.getMonth(),
+      desde.getDate(),
+    );
+    const fin = new Date(
+      hasta.getFullYear(),
+      hasta.getMonth(),
+      hasta.getDate(),
+    );
 
     if (cursor > fin) {
       return fin;

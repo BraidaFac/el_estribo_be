@@ -12,7 +12,8 @@ import { CreateFeriadoDto } from '../dto/create-feriado.dto';
 import { UpdateFeriadoDto } from '../dto/update-feriado.dto';
 import { Feriado, FeriadoOrigen } from '../entity/feriado.entity';
 
-const ARGENTINA_DATOS_FERIADOS_URL = 'https://api.argentinadatos.com/v1/feriados';
+const ARGENTINA_DATOS_FERIADOS_URL =
+  'https://api.argentinadatos.com/v1/feriados';
 
 export interface FeriadoV2Response {
   id: number;
@@ -82,7 +83,9 @@ export class FeriadosService {
       for (const item of items) {
         const fechaNorm = DateUtils.normalizeDateOnly(item.fecha);
         if (!fechaNorm) {
-          this.logger.warn(`Feriados API: fecha ignorada (formato inválido): ${item.fecha}`);
+          this.logger.warn(
+            `Feriados API: fecha ignorada (formato inválido): ${item.fecha}`,
+          );
           continue;
         }
 
@@ -184,7 +187,10 @@ export class FeriadosService {
     return this.toResponse(guardado);
   }
 
-  async actualizar(id: number, dto: UpdateFeriadoDto): Promise<FeriadoV2Response> {
+  async actualizar(
+    id: number,
+    dto: UpdateFeriadoDto,
+  ): Promise<FeriadoV2Response> {
     const row = await this.feriadoRepository.findOne({ where: { id } });
     if (!row) {
       throw new NotFoundException('Feriado no encontrado');

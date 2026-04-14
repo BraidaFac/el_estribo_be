@@ -4,9 +4,7 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * Crea asignaciones_servicio_reserva, migra datos desde sacos/pantalones/reservas,
  * elimina FK de lavandería/modista en sacos, pantalones y reservas.
  */
-export class AsignacionServicioReservaQuitaPrenda1762000000000
-  implements MigrationInterface
-{
+export class AsignacionServicioReservaQuitaPrenda1762000000000 implements MigrationInterface {
   name = 'AsignacionServicioReservaQuitaPrenda1762000000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {

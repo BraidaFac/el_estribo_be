@@ -1,24 +1,54 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import { CreateLavanderiaDto } from '../dto/create-lavanderia.dto';
+import {
+  CreatePrecioHistoricoDto,
+  UpdatePrecioHistoricoDto,
+} from '../dto/precio-historico.dto';
 import { UpdateLavanderiaDto } from '../dto/update-lavanderia.dto';
 import { Lavanderia } from '../entity/lavanderia.entity';
+import { PrecioHistoricoLavanderia } from '../entity/precio-historico-lavanderia.entity';
+
+export type LavanderiaConPrecio = Lavanderia & { precioActual: number | null };
+
+function getPrecioVigente(
+  precios: PrecioHistoricoLavanderia[],
+  fecha: Date,
+): number | null {
+  const isoFecha = fecha.toISOString().slice(0, 10);
+  const vigentes = precios
+    .filter((p) => p.vigenciaDesde <= isoFecha)
+    .sort((a, b) => b.vigenciaDesde.localeCompare(a.vigenciaDesde));
+  return vigentes.length > 0 ? vigentes[0].precio : null;
+}
 
 @Injectable()
 export class LavanderiasService {
   constructor(
     @InjectRepository(Lavanderia)
     private readonly lavanderiaRepository: Repository<Lavanderia>,
+    @InjectRepository(PrecioHistoricoLavanderia)
+    private readonly precioRepository: Repository<PrecioHistoricoLavanderia>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
   ) {}
 
-  async listar(): Promise<Lavanderia[]> {
-    return this.lavanderiaRepository.find({
+  async listar(): Promise<LavanderiaConPrecio[]> {
+    const lavanderias = await this.lavanderiaRepository.find({
       where: { activo: true },
+      relations: ['precios'],
       order: { predeterminada: 'DESC', nombre: 'ASC' },
     });
+    const hoy = new Date();
+    return lavanderias.map((l) => ({
+      ...l,
+      precioActual: getPrecioVigente(l.precios ?? [], hoy),
+    }));
   }
 
   async obtener(id: number): Promise<Lavanderia> {
@@ -97,10 +127,75 @@ export class LavanderiasService {
     });
   }
 
-  /**
-   * Una sola predeterminada activa: desactiva el flag en todas y activa la indicada.
-   * Debe ejecutarse dentro de la transacción del alta/edición para evitar dos `true` simultáneos.
-   */
+  // ── Precios históricos ──────────────────────────────────────────────────────
+
+  async listarPrecios(
+    lavanderiaId: number,
+  ): Promise<PrecioHistoricoLavanderia[]> {
+    await this.obtener(lavanderiaId);
+    return this.precioRepository.find({
+      where: { lavanderia: { id: lavanderiaId } },
+      order: { vigenciaDesde: 'DESC' },
+    });
+  }
+
+  async agregarPrecio(
+    lavanderiaId: number,
+    dto: CreatePrecioHistoricoDto,
+  ): Promise<PrecioHistoricoLavanderia> {
+    const hoy = new Date().toISOString().slice(0, 10);
+    if (dto.vigenciaDesde > hoy) {
+      throw new BadRequestException(
+        'vigenciaDesde no puede ser una fecha futura',
+      );
+    }
+    const lavanderia = await this.obtener(lavanderiaId);
+    const precio = this.precioRepository.create({
+      lavanderia,
+      precio: dto.precio,
+      vigenciaDesde: dto.vigenciaDesde,
+    });
+    return this.precioRepository.save(precio);
+  }
+
+  async actualizarPrecio(
+    precioId: number,
+    dto: UpdatePrecioHistoricoDto,
+  ): Promise<PrecioHistoricoLavanderia> {
+    const precio = await this.precioRepository.findOne({
+      where: { id: precioId },
+    });
+    if (!precio) {
+      throw new NotFoundException('Precio no encontrado');
+    }
+    if (dto.vigenciaDesde !== undefined) {
+      const hoy = new Date().toISOString().slice(0, 10);
+      if (dto.vigenciaDesde > hoy) {
+        throw new BadRequestException(
+          'vigenciaDesde no puede ser una fecha futura',
+        );
+      }
+      precio.vigenciaDesde = dto.vigenciaDesde;
+    }
+    if (dto.precio !== undefined) {
+      precio.precio = dto.precio;
+    }
+    return this.precioRepository.save(precio);
+  }
+
+  async eliminarPrecio(precioId: number): Promise<{ message: string }> {
+    const precio = await this.precioRepository.findOne({
+      where: { id: precioId },
+    });
+    if (!precio) {
+      throw new NotFoundException('Precio no encontrado');
+    }
+    await this.precioRepository.remove(precio);
+    return { message: 'Precio eliminado correctamente' };
+  }
+
+  // ── Privado ─────────────────────────────────────────────────────────────────
+
   private async setPredeterminadaLavanderiaWithManager(
     manager: EntityManager,
     id: number,

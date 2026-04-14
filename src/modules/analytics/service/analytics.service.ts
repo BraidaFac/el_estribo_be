@@ -14,6 +14,10 @@ import { Granularidad } from '../dto/bi-query.dto';
 import {
   BiDevolucionesResumen,
   BiEvolucionPunto,
+  BiLavadosEvolucionPunto,
+  BiLavadosResumen,
+  BiModistasEvolucionPunto,
+  BiModistasResumen,
   BiPreEntregaResumen,
   BiResponse,
 } from '../dto/bi-response.types';
@@ -33,11 +37,14 @@ export class AnalyticsService {
     hasta: string,
     granularidad: Granularidad,
   ): Promise<BiResponse> {
-    const [evolucionReservas, preEntrega, devoluciones] = await Promise.all([
-      this.queryEvolucion(desde, hasta, granularidad),
-      this.queryPreEntrega(desde, hasta),
-      this.queryDevoluciones(desde, hasta),
-    ]);
+    const [evolucionReservas, preEntrega, devoluciones, lavados, modistas] =
+      await Promise.all([
+        this.queryEvolucion(desde, hasta, granularidad),
+        this.queryPreEntrega(desde, hasta),
+        this.queryDevoluciones(desde, hasta),
+        this.queryLavados(desde, hasta, granularidad),
+        this.queryCostoModistas(desde, hasta, granularidad),
+      ]);
 
     return {
       generadoEn: new Date().toISOString(),
@@ -45,6 +52,8 @@ export class AnalyticsService {
       evolucionReservas,
       preEntrega,
       devoluciones,
+      lavados,
+      modistas,
     };
   }
 
@@ -141,6 +150,88 @@ export class AnalyticsService {
       perfectasCondiciones,
       malasCondiciones: total - perfectasCondiciones,
       conCargoAdicional,
+    };
+  }
+
+  private async queryLavados(
+    desde: string,
+    hasta: string,
+    granularidad: Granularidad,
+  ): Promise<BiLavadosResumen> {
+    const format = granularidad === 'MES' ? '%Y-%m' : '%x-W%v';
+
+    const rows: { periodo: string; cantidad: string; costoTotal: string }[] =
+      await this.dataSource.query(
+        `
+        SELECT
+          DATE_FORMAT(r.fecha_reserva, ?) AS periodo,
+          COUNT(t.id)                     AS cantidad,
+          COALESCE(SUM((
+            SELECT ph.precio
+            FROM precio_historico_lavanderia ph
+            WHERE ph.lavanderia_id = t.lavanderia_id
+              AND ph.vigencia_desde <= DATE(t.fecha_ingreso_lavanderia)
+            ORDER BY ph.vigencia_desde DESC
+            LIMIT 1
+          )), 0) AS costoTotal
+        FROM tareas_operativas t
+        JOIN reservas r ON r.id = t.reserva_id
+        WHERE t.tipo_tarea = 'LLEVAR_LAVANDERIA'
+          AND t.estado = 'COMPLETADA'
+          AND t.fecha_ingreso_lavanderia IS NOT NULL
+          AND r.fecha_reserva BETWEEN ? AND ?
+        GROUP BY periodo
+        ORDER BY periodo ASC
+      `,
+        [format, desde, hasta],
+      );
+
+    const evolucion: BiLavadosEvolucionPunto[] = rows.map((row) => ({
+      periodo: row.periodo,
+      cantidad: Number(row.cantidad),
+      costoTotal: Number(row.costoTotal),
+    }));
+
+    return {
+      totalLavados: evolucion.reduce((s, p) => s + p.cantidad, 0),
+      costoTotal: evolucion.reduce((s, p) => s + p.costoTotal, 0),
+      evolucion,
+    };
+  }
+
+  private async queryCostoModistas(
+    desde: string,
+    hasta: string,
+    granularidad: Granularidad,
+  ): Promise<BiModistasResumen> {
+    const format = granularidad === 'MES' ? '%Y-%m' : '%x-W%v';
+
+    const rows: { periodo: string; costoTotal: string }[] =
+      await this.dataSource.query(
+        `
+        SELECT
+          DATE_FORMAT(r.fecha_reserva, ?) AS periodo,
+          COALESCE(SUM(t.costo_modista), 0) AS costoTotal
+        FROM tareas_operativas t
+        JOIN reservas r ON r.id = t.reserva_id
+        WHERE t.tipo_tarea = 'LLEVAR_MODISTA'
+          AND t.estado = 'COMPLETADA'
+          AND t.costo_modista IS NOT NULL
+          AND r.fecha_reserva BETWEEN ? AND ?
+        GROUP BY periodo
+        ORDER BY periodo ASC
+      `,
+        [format, desde, hasta],
+      );
+
+    const evolucion: BiModistasEvolucionPunto[] = rows.map((row) => ({
+      periodo: row.periodo,
+      costoTotal: Number(row.costoTotal),
+    }));
+
+    return {
+      costoTotal: evolucion.reduce((s, p) => s + p.costoTotal, 0),
+      evolucion,
     };
   }
 }

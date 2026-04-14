@@ -80,7 +80,10 @@ export class TareasOperativasController {
     @Body() body: RetirarLavanderiaLoteDto,
     @Req() req: ReqWithUser,
   ): Promise<void> {
-    await this.tareasOperativasService.retirarLavanderiaLote(body, req.user.sub);
+    await this.tareasOperativasService.retirarLavanderiaLote(
+      body,
+      req.user.sub,
+    );
   }
 
   @Post('reservas/:reservaId/enviar-lavanderia')

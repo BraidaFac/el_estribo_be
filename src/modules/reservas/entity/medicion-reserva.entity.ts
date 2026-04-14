@@ -24,13 +24,28 @@ export class MedicionReserva {
   @Column({ name: 'mediciones_json', type: 'json' })
   medicionesJson: MedicionesReservaJson;
 
-  @Column({ name: 'observacion_saco', type: 'varchar', length: 500, nullable: true })
+  @Column({
+    name: 'observacion_saco',
+    type: 'varchar',
+    length: 500,
+    nullable: true,
+  })
   observacionSaco: string | null;
 
-  @Column({ name: 'observacion_pantalon', type: 'varchar', length: 500, nullable: true })
+  @Column({
+    name: 'observacion_pantalon',
+    type: 'varchar',
+    length: 500,
+    nullable: true,
+  })
   observacionPantalon: string | null;
 
-  @Column({ name: 'observacion_general', type: 'varchar', length: 500, nullable: true })
+  @Column({
+    name: 'observacion_general',
+    type: 'varchar',
+    length: 500,
+    nullable: true,
+  })
   observacionGeneral: string | null;
 
   @Column({ name: 'sin_modista', type: 'boolean', default: false })

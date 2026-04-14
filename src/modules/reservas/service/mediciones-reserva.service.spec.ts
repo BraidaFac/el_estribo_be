@@ -38,16 +38,24 @@ describe('MedicionesReservaService — validación de ubicación', () => {
     };
 
     mockDataSource = {
-      transaction: jest.fn().mockImplementation((cb: (m: EntityManager) => Promise<unknown>) =>
-        cb(mockManager as EntityManager),
-      ),
+      transaction: jest
+        .fn()
+        .mockImplementation((cb: (m: EntityManager) => Promise<unknown>) =>
+          cb(mockManager as EntityManager),
+        ),
     };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MedicionesReservaService,
-        { provide: getRepositoryToken(MedicionReserva), useValue: { findOne: jest.fn() } },
-        { provide: getRepositoryToken(Reserva), useValue: { findOne: jest.fn() } },
+        {
+          provide: getRepositoryToken(MedicionReserva),
+          useValue: { findOne: jest.fn() },
+        },
+        {
+          provide: getRepositoryToken(Reserva),
+          useValue: { findOne: jest.fn() },
+        },
         { provide: DataSource, useValue: mockDataSource },
         {
           provide: TareasOperativasService,
@@ -63,53 +71,73 @@ describe('MedicionesReservaService — validación de ubicación', () => {
     reserva: Reserva | null,
     medicion: MedicionReserva | null = null,
   ) {
-    (mockManager.getRepository as jest.Mock).mockImplementation((entity: unknown) => {
-      if (entity === Reserva) {
-        return { findOne: jest.fn().mockResolvedValue(reserva) };
-      }
-      if (entity === MedicionReserva) {
-        return {
-          findOne: jest.fn().mockResolvedValue(medicion),
-          create: jest.fn().mockReturnValue({}),
-          save: jest.fn().mockResolvedValue({ updatedAt: new Date() }),
-        };
-      }
-      return { findOne: jest.fn(), save: jest.fn() };
-    });
+    (mockManager.getRepository as jest.Mock).mockImplementation(
+      (entity: unknown) => {
+        if (entity === Reserva) {
+          return { findOne: jest.fn().mockResolvedValue(reserva) };
+        }
+        if (entity === MedicionReserva) {
+          return {
+            findOne: jest.fn().mockResolvedValue(medicion),
+            create: jest.fn().mockReturnValue({}),
+            save: jest.fn().mockResolvedValue({ updatedAt: new Date() }),
+          };
+        }
+        return { findOne: jest.fn(), save: jest.fn() };
+      },
+    );
   }
 
   it('lanza NotFoundException si la reserva no existe', async () => {
     setupManagerRepo(null);
-    await expect(service.guardar(1, buildDto())).rejects.toThrow(NotFoundException);
+    await expect(service.guardar(1, buildDto())).rejects.toThrow(
+      NotFoundException,
+    );
   });
 
   it('lanza BadRequestException si el saco está en RETIRADO_CLIENTE', async () => {
     setupManagerRepo(buildReserva(EstadoUbicacionPrenda.RETIRADO_CLIENTE));
-    await expect(service.guardar(1, buildDto())).rejects.toThrow(BadRequestException);
+    await expect(service.guardar(1, buildDto())).rejects.toThrow(
+      BadRequestException,
+    );
   });
 
   it('lanza BadRequestException si el saco está en EN_MODISTA', async () => {
     setupManagerRepo(buildReserva(EstadoUbicacionPrenda.EN_MODISTA));
-    await expect(service.guardar(1, buildDto())).rejects.toThrow(BadRequestException);
+    await expect(service.guardar(1, buildDto())).rejects.toThrow(
+      BadRequestException,
+    );
   });
 
   it('lanza BadRequestException si el saco está en EN_LAVANDERIA', async () => {
     setupManagerRepo(buildReserva(EstadoUbicacionPrenda.EN_LAVANDERIA));
-    await expect(service.guardar(1, buildDto())).rejects.toThrow(BadRequestException);
+    await expect(service.guardar(1, buildDto())).rejects.toThrow(
+      BadRequestException,
+    );
   });
 
   it('lanza BadRequestException si el pantalón está en EN_LAVANDERIA (saco en tienda)', async () => {
     setupManagerRepo(
-      buildReserva(EstadoUbicacionPrenda.TIENDA, EstadoUbicacionPrenda.EN_LAVANDERIA),
+      buildReserva(
+        EstadoUbicacionPrenda.TIENDA,
+        EstadoUbicacionPrenda.EN_LAVANDERIA,
+      ),
     );
-    await expect(service.guardar(1, buildDto())).rejects.toThrow(BadRequestException);
+    await expect(service.guardar(1, buildDto())).rejects.toThrow(
+      BadRequestException,
+    );
   });
 
   it('lanza BadRequestException si el pantalón está en RETIRADO_CLIENTE (saco en tienda)', async () => {
     setupManagerRepo(
-      buildReserva(EstadoUbicacionPrenda.TIENDA, EstadoUbicacionPrenda.RETIRADO_CLIENTE),
+      buildReserva(
+        EstadoUbicacionPrenda.TIENDA,
+        EstadoUbicacionPrenda.RETIRADO_CLIENTE,
+      ),
     );
-    await expect(service.guardar(1, buildDto())).rejects.toThrow(BadRequestException);
+    await expect(service.guardar(1, buildDto())).rejects.toThrow(
+      BadRequestException,
+    );
   });
 
   it('el error menciona "saco" cuando el saco no está en tienda', async () => {
@@ -121,7 +149,10 @@ describe('MedicionesReservaService — validación de ubicación', () => {
 
   it('el error menciona "pantalón" cuando el pantalón no está en tienda', async () => {
     setupManagerRepo(
-      buildReserva(EstadoUbicacionPrenda.TIENDA, EstadoUbicacionPrenda.EN_MODISTA),
+      buildReserva(
+        EstadoUbicacionPrenda.TIENDA,
+        EstadoUbicacionPrenda.EN_MODISTA,
+      ),
     );
     await expect(service.guardar(1, buildDto())).rejects.toThrow(
       expect.objectContaining({ message: expect.stringContaining('pantalón') }),
@@ -130,6 +161,8 @@ describe('MedicionesReservaService — validación de ubicación', () => {
 
   it('con sinModista=true también valida la ubicación del saco', async () => {
     setupManagerRepo(buildReserva(EstadoUbicacionPrenda.RETIRADO_CLIENTE));
-    await expect(service.guardar(1, buildDto(true))).rejects.toThrow(BadRequestException);
+    await expect(service.guardar(1, buildDto(true))).rejects.toThrow(
+      BadRequestException,
+    );
   });
 });

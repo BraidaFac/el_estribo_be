@@ -8,6 +8,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { BloqueoPrenda } from 'src/modules/bloqueos/entity/bloqueo-prenda.entity';
+import { PrecioHistoricoLavanderia } from './precio-historico-lavanderia.entity';
 
 @Entity({ name: 'lavanderias' })
 export class Lavanderia {
@@ -31,6 +32,9 @@ export class Lavanderia {
 
   @OneToMany(() => BloqueoPrenda, (bloqueo) => bloqueo.lavanderia)
   bloqueos: BloqueoPrenda[];
+
+  @OneToMany(() => PrecioHistoricoLavanderia, (p) => p.lavanderia)
+  precios: PrecioHistoricoLavanderia[];
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
   createdAt: Date;

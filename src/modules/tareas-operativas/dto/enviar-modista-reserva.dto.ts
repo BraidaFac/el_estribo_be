@@ -1,4 +1,10 @@
-import { IsBoolean, IsInt, IsOptional, IsString, ValidateIf } from 'class-validator';
+import {
+  IsBoolean,
+  IsInt,
+  IsOptional,
+  IsString,
+  ValidateIf,
+} from 'class-validator';
 
 /**
  * Registro de envío a modista por reserva (saco y opcionalmente pantalón).

@@ -31,7 +31,10 @@ export class AccesoriosController {
   }
 
   @Patch(':id')
-  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateAccesorioDto) {
+  update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateAccesorioDto,
+  ) {
     return this.accesoriosService.update(id, dto);
   }
 

@@ -26,8 +26,13 @@ export class ReservaExtrasService {
     });
   }
 
-  async setExtras(reservaId: number, dto: SetReservaExtrasDto): Promise<ReservaExtra[]> {
-    const reserva = await this.reservaRepository.findOne({ where: { id: reservaId } });
+  async setExtras(
+    reservaId: number,
+    dto: SetReservaExtrasDto,
+  ): Promise<ReservaExtra[]> {
+    const reserva = await this.reservaRepository.findOne({
+      where: { id: reservaId },
+    });
     if (!reserva) throw new NotFoundException('Reserva no encontrada');
 
     await this.dataSource.transaction(async (manager) => {
@@ -40,7 +45,10 @@ export class ReservaExtrasService {
 
         const newExtras = dto.extras.map((item) => {
           const accesorio = accesorioMap.get(item.accesorioId);
-          if (!accesorio) throw new NotFoundException(`Accesorio ${item.accesorioId} no encontrado`);
+          if (!accesorio)
+            throw new NotFoundException(
+              `Accesorio ${item.accesorioId} no encontrado`,
+            );
           return manager.create(ReservaExtra, {
             reserva,
             accesorio,
@@ -55,13 +63,19 @@ export class ReservaExtrasService {
     return this.findByReserva(reservaId);
   }
 
-  async patchDevolucion(reservaId: number, dto: PatchDevolucionExtrasDto): Promise<ReservaExtra[]> {
+  async patchDevolucion(
+    reservaId: number,
+    dto: PatchDevolucionExtrasDto,
+  ): Promise<ReservaExtra[]> {
     const extras = await this.findByReserva(reservaId);
     const extraMap = new Map(extras.map((e) => [e.id, e]));
 
     for (const item of dto.extras) {
       const extra = extraMap.get(item.extraId);
-      if (!extra) throw new NotFoundException(`Extra ${item.extraId} no encontrado en esta reserva`);
+      if (!extra)
+        throw new NotFoundException(
+          `Extra ${item.extraId} no encontrado en esta reserva`,
+        );
       extra.devuelto = item.devuelto;
       extra.observacionDevolucion = item.observacionDevolucion ?? null;
       await this.extraRepository.save(extra);

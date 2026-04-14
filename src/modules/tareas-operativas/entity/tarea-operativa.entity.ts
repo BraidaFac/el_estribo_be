@@ -105,11 +105,19 @@ export class TareaOperativa {
   lavanderia: Lavanderia | null;
 
   /** Fecha y hora en que el ítem fue enviado a lavandería (lote o individual). */
-  @Column({ name: 'fecha_ingreso_lavanderia', type: 'timestamp', nullable: true })
+  @Column({
+    name: 'fecha_ingreso_lavanderia',
+    type: 'timestamp',
+    nullable: true,
+  })
   fechaIngresoLavanderia: Date | null;
 
   /** Fecha y hora en que el ítem fue retirado de lavandería. */
-  @Column({ name: 'fecha_retiro_lavanderia', type: 'timestamp', nullable: true })
+  @Column({
+    name: 'fecha_retiro_lavanderia',
+    type: 'timestamp',
+    nullable: true,
+  })
   fechaRetiroLavanderia: Date | null;
 
   @ManyToOne(() => User, { nullable: true })

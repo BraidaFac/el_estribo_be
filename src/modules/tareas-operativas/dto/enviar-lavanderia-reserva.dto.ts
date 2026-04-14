@@ -1,4 +1,10 @@
-import { IsBoolean, IsInt, IsOptional, IsString, ValidateIf } from 'class-validator';
+import {
+  IsBoolean,
+  IsInt,
+  IsOptional,
+  IsString,
+  ValidateIf,
+} from 'class-validator';
 
 /**
  * Registro de envío a lavandería por reserva (saco y opcionalmente pantalón).
@@ -16,10 +22,7 @@ export class EnviarLavanderiaReservaDto {
   @IsBoolean()
   pantalonVaALavanderia?: boolean;
 
-  @ValidateIf(
-    (o) =>
-      o.pantalonVaALavanderia === true,
-  )
+  @ValidateIf((o) => o.pantalonVaALavanderia === true)
   @IsInt()
   pantalonLavanderiaId?: number;
 

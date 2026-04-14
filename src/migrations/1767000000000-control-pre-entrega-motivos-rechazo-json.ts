@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class ControlPreEntregaMotivosRechazoJson1767000000000
-  implements MigrationInterface
-{
+export class ControlPreEntregaMotivosRechazoJson1767000000000 implements MigrationInterface {
   name = 'ControlPreEntregaMotivosRechazoJson1767000000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {

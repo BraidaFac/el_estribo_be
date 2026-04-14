@@ -33,10 +33,7 @@ export class ControlPreEntregaController {
   }
 
   @Post()
-  crear(
-    @Body() body: CreateControlPreEntregaDto,
-    @Req() req: ReqWithUser,
-  ) {
+  crear(@Body() body: CreateControlPreEntregaDto, @Req() req: ReqWithUser) {
     return this.controlPreEntregaService.crear(body, req.user.sub);
   }
 
