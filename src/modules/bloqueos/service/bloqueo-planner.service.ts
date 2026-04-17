@@ -217,6 +217,8 @@ export class BloqueoPlannerService {
     pantalonId?: number | null,
     manager?: EntityManager,
   ): Promise<RangoPlanificado[]> {
+    const configuracion = await this.configuracionGeneralService.obtener();
+
     const ideal = await this.obtenerRangosPlanificados(
       fechaReservaIso,
       requiereModista,
@@ -247,82 +249,50 @@ export class BloqueoPlannerService {
       (r) => r.tipoBloqueo === TipoBloqueo.LISTO_TIENDA,
     );
 
-    // Los pre-bloqueos no pueden generarse antes de disponibleDesde ni antes de hoy
-    const startDateIdeal = medicionIdeal.inicio;
+    // Los spans ideales son directamente los valores de configuración
+    const spanModIdeal = requiereModista && modistaIdeal ? configuracion.diasModista : 0;
+    const spanMedIdeal = medicionIdeal ? configuracion.diasTomarMediciones : 0;
 
-    const dias = await this.listarDiasHabilesSinBloqueosDesdeHastaExclusivo(
-      startDateIdeal,
+    // Días hábiles libres consecutivos inmediatamente antes de la reserva (scan backward)
+    const dias = await this.listarDiasLibresConsecutivosAntesDeReserva(
       fechaReservaIso,
       sacoId,
       pantalonId,
       manager,
     );
 
-    console.log(modistaIdeal);
+    // Con 0 o 1 día libre, LISTO se mueve a la fecha de reserva y MED+MOD usan todo el presupuesto
+    const listoSeMovioAReserva = dias.length <= 1;
+    const listoEfectivo = listoSeMovioAReserva
+      ? fechaReservaKey
+      : dias[dias.length - 1];
 
-    const spanModIdeal = modistaIdeal
-      ? await this.contarDiasHabilesEnRango(
-          modistaIdeal.inicio,
-          modistaIdeal.fin,
-        )
-      : 0;
-
-    console.log(medicionIdeal);
-
-    const spanMedIdeal = medicionIdeal
-      ? await this.contarDiasHabilesEnRango(
-          medicionIdeal.inicio,
-          medicionIdeal.fin,
-        )
-      : 0;
-
-    console.log(spanMedIdeal);
-    console.log(spanModIdeal);
+    // Presupuesto para MED+MOD: reservar 1 slot para LISTO si tiene día propio
+    const diasParaMedMod = listoSeMovioAReserva
+      ? dias.length
+      : dias.length - 1;
 
     // Comprimir spans hasta que entren en los días disponibles
     const [spanMed, spanMod] = this.comprimirSpans(
       spanMedIdeal,
       spanModIdeal,
-      dias.length,
+      diasParaMedMod,
     );
-
-    console.log(spanMed, spanMod);
 
     // Construir bloqueos previos según escenario
     const previos: RangoPlanificado[] = [
-      this.construirBloqueo(
-        TipoBloqueo.MEDICION,
-        spanMed,
-        0,
-        dias,
-        fechaReservaKey,
-      ),
-      this.construirBloqueo(
-        TipoBloqueo.MODISTA,
-        spanMod,
-        spanMed,
-        dias,
-        fechaReservaKey,
-        spanMed,
-      ),
+      this.construirBloqueo(TipoBloqueo.MEDICION, spanMed, 0, dias, fechaReservaKey),
+      this.construirBloqueo(TipoBloqueo.MODISTA, spanMod, spanMed, dias, fechaReservaKey, spanMed),
     ];
-    const startDateReal = previos.reduce((min, current) =>
-      current.inicio < min.inicio ? current : min,
-    ).inicio;
 
-    // LISTO_TIENDA: usar el día ideal pero sin pisar antes de startDate
-    if (listoIdeal) {
-      const diaListo = listoIdeal.inicio;
-      const efectivoDiaListo =
-        diaListo >= startDateReal ? diaListo : startDateReal;
-      if (efectivoDiaListo <= fechaReservaKey) {
-        previos.push({
-          tipoBloqueo: TipoBloqueo.LISTO_TIENDA,
-          inicio: efectivoDiaListo,
-          fin: efectivoDiaListo,
-          cancelableManual: false,
-        });
-      }
+    // LISTO_TIENDA
+    if (listoEfectivo <= fechaReservaKey) {
+      previos.push({
+        tipoBloqueo: TipoBloqueo.LISTO_TIENDA,
+        inicio: listoEfectivo,
+        fin: listoEfectivo,
+        cancelableManual: false,
+      });
     }
 
     const rangos: RangoPlanificado[] = [
@@ -436,38 +406,40 @@ export class BloqueoPlannerService {
     return lista.length;
   }
 
-  private async listarDiasHabilesSinBloqueosDesdeHastaExclusivo(
-    desdeStr: string,
-    finStr: string,
+  /**
+   * Recorre hacia atrás desde el día anterior a la reserva y acumula días hábiles
+   * libres consecutivos hasta encontrar un día hábil ocupado o llegar a hoy.
+   * Los días no hábiles (domingos, feriados) se saltan sin romper la cadena.
+   */
+  private async listarDiasLibresConsecutivosAntesDeReserva(
+    fechaReservaStr: string,
     sacoId?: number,
     pantalonId?: number | null,
     manager?: EntityManager,
   ): Promise<string[]> {
-    const fin = DateUtils.toDateOnly(finStr);
-    const desde = DateUtils.toDateOnly(desdeStr);
-    if (!fin || !desde) {
-      return [];
-    }
-    const out: string[] = [];
-    for (let d = new Date(desde); d < fin; d = addDays(d, 1)) {
-      const fechaStr = DateUtils.formatDateOnly(d);
-      const esHabil = await this.calendarioLaboralService.esHabil(new Date(d));
-      if (!esHabil) continue;
-      if (
-        sacoId !== undefined &&
-        !(await this.esDiaLibreParaPrenda(
-          fechaStr,
-          sacoId,
-          pantalonId ?? null,
-          manager,
-        ))
-      ) {
+    const fechaReserva = DateUtils.toDateOnly(fechaReservaStr);
+    const hoy = DateUtils.toDateOnly(DateUtils.getTodayDateOnly());
+    if (!fechaReserva) return [];
+
+    const result: string[] = [];
+    let cursor = addDays(new Date(fechaReserva), -1);
+
+    while (cursor >= hoy) {
+      const esHabil = await this.calendarioLaboralService.esHabil(new Date(cursor));
+      if (!esHabil) {
+        cursor = addDays(cursor, -1);
         continue;
       }
-      out.push(fechaStr);
+      const fechaStr = DateUtils.formatDateOnly(cursor);
+      const libre =
+        sacoId === undefined ||
+        (await this.esDiaLibreParaPrenda(fechaStr, sacoId, pantalonId ?? null, manager));
+      if (!libre) break;
+      result.unshift(fechaStr);
+      cursor = addDays(cursor, -1);
     }
 
-    return out;
+    return result;
   }
 
   private async listarDiasHabilesSinBloqueosEnRangoInclusive(
