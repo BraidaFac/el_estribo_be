@@ -603,4 +603,41 @@ export class BloqueoPlannerService {
       );
     }
   }
+
+  /**
+   * Recrea bloqueos específicos de una prenda para una reserva durante una reversión de paso.
+   * Usa el mismo cálculo de rangos que la planificación original.
+   */
+  async recrearBloqueosParaReversion(
+    input: {
+      tipoPrenda: TipoPrenda;
+      prendaId: number;
+      reservaId: number;
+      fechaReserva: string;
+      requiereModista: boolean;
+      tiposBloqueo: TipoBloqueo[];
+      usuarioId: string | null;
+    },
+    manager: EntityManager,
+  ): Promise<void> {
+    const todos = await this.obtenerRangosPlanificados(
+      input.fechaReserva,
+      input.requiereModista,
+    );
+    const rangos = todos.filter((r) => input.tiposBloqueo.includes(r.tipoBloqueo));
+    if (rangos.length === 0) return;
+
+    await this.crearBloqueosDePrenda(
+      {
+        tipoPrenda: input.tipoPrenda,
+        prendaId: input.prendaId,
+        reservaId: input.reservaId,
+        modistaId: null,
+        lavanderiaId: null,
+        rangos,
+        creadoPor: input.usuarioId,
+      },
+      manager,
+    );
+  }
 }

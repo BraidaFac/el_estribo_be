@@ -25,6 +25,8 @@ import { RecepcionDevolucionReserva } from './entity/recepcion-devolucion-reserv
 import { Reserva } from './entity/reserva.entity';
 import { DisponibilidadService } from './service/disponibilidad.service';
 import { MedicionesReservaService } from './service/mediciones-reserva.service';
+import { PasosReservaService } from './service/pasos-reserva.service';
+import { RevertirPasoService } from './service/revertir-paso.service';
 import { ReservasV2Service } from './service/reservas-v2.service';
 
 @Module({
@@ -59,11 +61,15 @@ import { ReservasV2Service } from './service/reservas-v2.service';
     DisponibilidadService,
     ReservasV2Service,
     MedicionesReservaService,
+    PasosReservaService,
+    RevertirPasoService,
   ],
   exports: [
     ReservasV2Service,
     DisponibilidadService,
     MedicionesReservaService,
+    PasosReservaService,
+    RevertirPasoService,
     TypeOrmModule,
   ],
 })

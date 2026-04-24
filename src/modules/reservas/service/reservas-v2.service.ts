@@ -16,6 +16,7 @@ import {
   BotonesCierresInspeccion,
   DanoGraveInspeccion,
   EstadoBloqueo,
+  EstadoControlPreEntrega,
   EstadoReserva,
   EstadoTareaOperativa,
   EstadoUbicacionPrenda,
@@ -27,6 +28,7 @@ import {
 } from 'src/modules/common/enums/reservas-domain.enums';
 import { ConfiguracionGeneral } from 'src/modules/configuracion-general/entity/configuracion-general.entity';
 import { ConfiguracionGeneralService } from 'src/modules/configuracion-general/service/configuracion-general.service';
+import { ControlPreEntrega } from 'src/modules/control-pre-entrega/entity/control-pre-entrega.entity';
 import { ControlPreEntregaService } from 'src/modules/control-pre-entrega/service/control-pre-entrega.service';
 import { Lavanderia } from 'src/modules/lavanderias/entity/lavanderia.entity';
 import { Modista } from 'src/modules/modistas/entity/modista.entity';
@@ -1558,24 +1560,27 @@ export class ReservasV2Service {
   private async construirTrazabilidadReserva(
     reservaId: number,
   ): Promise<TrazabilidadEventoDto[]> {
+    // Normaliza cualquier valor de fecha a ISO 8601 con T (datetime completo).
+    const nd = (val: Date | string | null | undefined): string | null => {
+      if (!val) return null;
+      if (val instanceof Date) return val.toISOString();
+      const d = new Date(val as string);
+      return isNaN(d.getTime()) ? null : d.toISOString();
+    };
+
     const items: TrazabilidadEventoDto[] = [];
     const reserva = await this.reservaRepository.findOne({
       where: { id: reservaId },
       relations: ['saco', 'pantalon'],
     });
-    if (!reserva) {
-      return [];
-    }
+    if (!reserva) return [];
 
     items.push({
       id: 'evt-reserva-creada',
       categoria: 'reserva',
       titulo: 'Reserva registrada',
       descripcion: null,
-      fecha:
-        reserva.createdAt instanceof Date
-          ? reserva.createdAt.toISOString()
-          : String(reserva.createdAt),
+      fecha: nd(reserva.createdAt),
     });
 
     const tareas = await this.tareaOperativaRepository.find({
@@ -1585,11 +1590,7 @@ export class ReservasV2Service {
     });
     for (const t of tareas) {
       const fechaRef =
-        t.estado === EstadoTareaOperativa.COMPLETADA
-          ? t.updatedAt
-          : t.createdAt;
-      const fechaIso =
-        fechaRef instanceof Date ? fechaRef.toISOString() : String(fechaRef);
+        t.estado === EstadoTareaOperativa.COMPLETADA ? t.updatedAt : t.createdAt;
       const prenda =
         t.tipoPrenda === TipoPrenda.SACO
           ? `Saco ${t.saco?.codigo ?? ''}`
@@ -1601,7 +1602,7 @@ export class ReservasV2Service {
         categoria: 'tarea',
         titulo: this.tituloTareaTrazabilidad(t.tipoTarea),
         descripcion: `${t.estado}${prenda ? ` · ${prenda}` : ''}`,
-        fecha: fechaIso,
+        fecha: nd(fechaRef),
       });
     }
 
@@ -1616,10 +1617,7 @@ export class ReservasV2Service {
         categoria: 'movimiento',
         titulo: 'Cambio de ubicación de prenda',
         descripcion: `${m.estadoAnterior ?? '?'} → ${m.estadoNuevo}${m.motivo ? ` · ${m.motivo}` : ''}`,
-        fecha:
-          m.createdAt instanceof Date
-            ? m.createdAt.toISOString()
-            : String(m.createdAt),
+        fecha: nd(m.createdAt),
       });
     }
 
@@ -1628,31 +1626,58 @@ export class ReservasV2Service {
       order: { id: 'ASC' },
     });
     for (const a of agendas) {
-      const fh =
-        a.fechaHoraCita instanceof Date
-          ? a.fechaHoraCita.toISOString()
-          : String(a.fechaHoraCita);
       items.push({
         id: `evt-agenda-${a.id}`,
         categoria: 'agenda',
         titulo: `Agenda medición (${a.estado})`,
         descripcion: a.observaciones?.trim() || null,
-        fecha: fh,
+        fecha: nd(a.fechaHoraCita),
       });
     }
 
-    const ctrl =
-      await this.controlPreEntregaService.obtenerPorReservaId(reservaId);
-    if (ctrl) {
+    // Todos los controles pre-entrega (incluyendo REVERTIDO) para trazabilidad completa
+    const controles = await this.dataSource.manager.find(ControlPreEntrega, {
+      where: { reserva: { id: reservaId } as any },
+      relations: ['creadoPor'],
+      order: { id: 'ASC' },
+    });
+    for (const ctrl of controles) {
+      const esRevertido = ctrl.estado === EstadoControlPreEntrega.REVERTIDO;
       items.push({
         id: `evt-preentrega-${ctrl.id}`,
         categoria: 'control_pre_entrega',
-        titulo: `Control pre-entrega (${ctrl.estado})`,
+        titulo: esRevertido
+          ? 'Control pre-entrega (revertido)'
+          : `Control pre-entrega (${ctrl.estado.toLowerCase()})`,
         descripcion: ctrl.creadoPor ? `Auditor: ${ctrl.creadoPor.name}` : null,
-        fecha:
-          ctrl.createdAt instanceof Date
-            ? ctrl.createdAt.toISOString()
-            : String(ctrl.createdAt),
+        fecha: nd(ctrl.createdAt),
+      });
+    }
+
+    // Eventos de reversión desde metadatos de tareas
+    const labelTipoTareaCorto: Record<TipoTareaOperativa, string> = {
+      [TipoTareaOperativa.CONTACTAR_MEDICION]: 'contactar medición',
+      [TipoTareaOperativa.LLEVAR_LAVANDERIA]: 'lavandería',
+      [TipoTareaOperativa.LLEVAR_MODISTA]: 'modista',
+    };
+    for (const t of tareas) {
+      const meta = (t.metadataJson ?? {}) as Record<string, unknown>;
+      if (!meta['revertidoAt']) continue;
+      const prenda =
+        t.tipoPrenda === TipoPrenda.SACO
+          ? `Saco ${t.saco?.codigo ?? ''}`
+          : t.tipoPrenda === TipoPrenda.PANTALON
+            ? `Pantalón ${t.pantalon?.codigo ?? ''}`
+            : '';
+      items.push({
+        id: `evt-reversion-${t.id}`,
+        categoria: 'reversion',
+        titulo: `Reversión: ${labelTipoTareaCorto[t.tipoTarea] ?? t.tipoTarea}`,
+        descripcion: [
+          prenda || null,
+          meta['motivoReversion'] ? `Motivo: ${meta['motivoReversion']}` : null,
+        ].filter(Boolean).join(' · ') || null,
+        fecha: meta['revertidoAt'] as string,
       });
     }
 
@@ -1662,7 +1687,7 @@ export class ReservasV2Service {
         categoria: 'cliente',
         titulo: 'Retiro del traje por el cliente',
         descripcion: null,
-        fecha: reserva.clienteRetiroAt,
+        fecha: nd(reserva.clienteRetiroAt),
       });
     }
     if (reserva.clienteDevolvioAt) {
@@ -1671,15 +1696,11 @@ export class ReservasV2Service {
         categoria: 'cliente',
         titulo: 'Devolución del traje por el cliente',
         descripcion: null,
-        fecha: reserva.clienteDevolvioAt,
+        fecha: nd(reserva.clienteDevolvioAt),
       });
     }
 
-    items.sort((a, b) => {
-      const fa = a.fecha ?? '';
-      const fb = b.fecha ?? '';
-      return fa.localeCompare(fb);
-    });
+    items.sort((a, b) => (a.fecha ?? '').localeCompare(b.fecha ?? ''));
     return items;
   }
 

@@ -17,7 +17,8 @@ export type TrazabilidadEventoDto = {
     | 'movimiento'
     | 'agenda'
     | 'control_pre_entrega'
-    | 'cliente';
+    | 'cliente'
+    | 'reversion';
   titulo: string;
   descripcion: string | null;
   /** ISO 8601 o yyyy-MM-dd según origen */

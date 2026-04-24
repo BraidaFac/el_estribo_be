@@ -6,6 +6,7 @@ import {
   ParseIntPipe,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -23,8 +24,11 @@ export class ControlPreEntregaController {
   ) {}
 
   @Get('planilla-preparar')
-  planillaPreparar() {
-    return this.controlPreEntregaService.planillaPreparar();
+  planillaPreparar(
+    @Query('desde') desde?: string,
+    @Query('hasta') hasta?: string,
+  ) {
+    return this.controlPreEntregaService.planillaPreparar(desde, hasta);
   }
 
   @Get('rechazados')

@@ -22,7 +22,10 @@ import { QueryDisponibilidadDto } from '../dto/query-disponibilidad.dto';
 import { GuardarMedicionesReservaDto } from '../dto/guardar-mediciones-reserva.dto';
 import { ValidarReservaV2Dto } from '../dto/validar-reserva-v2.dto';
 import { MedicionesReservaService } from '../service/mediciones-reserva.service';
+import { PasosReservaService } from '../service/pasos-reserva.service';
+import { RevertirPasoService } from '../service/revertir-paso.service';
 import { ReservasV2Service } from '../service/reservas-v2.service';
+import { RevertirUltimoPasoDto } from '../dto/pasos-reserva.dto';
 
 @Controller('v2/reservas')
 @UseGuards(AuthGuard)
@@ -30,6 +33,8 @@ export class ReservasV2Controller {
   constructor(
     private readonly reservasV2Service: ReservasV2Service,
     private readonly medicionesReservaService: MedicionesReservaService,
+    private readonly pasosReservaService: PasosReservaService,
+    private readonly revertirPasoService: RevertirPasoService,
   ) {}
 
   @Get()
@@ -147,6 +152,24 @@ export class ReservasV2Controller {
       reservaId,
       body.usuarioId ?? request?.user?.sub,
       body.motivo,
+    );
+  }
+
+  @Get(':reservaId/pasos-completados')
+  obtenerPasosCompletados(@Param('reservaId', ParseIntPipe) reservaId: number) {
+    return this.pasosReservaService.obtenerPasosCompletados(reservaId);
+  }
+
+  @Post(':reservaId/revertir-ultimo-paso')
+  revertirUltimoPaso(
+    @Param('reservaId', ParseIntPipe) reservaId: number,
+    @Body() body: RevertirUltimoPasoDto,
+    @Req() request: any,
+  ) {
+    return this.revertirPasoService.revertirUltimoPaso(
+      reservaId,
+      body,
+      request?.user?.sub,
     );
   }
 }

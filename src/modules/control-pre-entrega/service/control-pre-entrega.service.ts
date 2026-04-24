@@ -15,7 +15,7 @@ import { Reserva } from 'src/modules/reservas/entity/reserva.entity';
 import { TareasOperativasService } from 'src/modules/tareas-operativas/service/tareas-operativas.service';
 import { User } from 'src/user/user.entity';
 import { DateUtils } from 'src/utils/date_utils';
-import { Brackets, DataSource, Repository } from 'typeorm';
+import { Brackets, DataSource, Not, Repository } from 'typeorm';
 import { CreateControlPreEntregaDto } from '../dto/create-control-pre-entrega.dto';
 import { ControlPreEntrega } from '../entity/control-pre-entrega.entity';
 
@@ -57,7 +57,7 @@ export class ControlPreEntregaService {
     reservaId: number,
   ): Promise<ControlPreEntrega | null> {
     return this.controlRepository.findOne({
-      where: { reserva: { id: reservaId } },
+      where: { reserva: { id: reservaId }, estado: Not(EstadoControlPreEntrega.REVERTIDO) },
       relations: ['creadoPor', 'resueltoPor'],
     });
   }
@@ -69,7 +69,7 @@ export class ControlPreEntregaService {
     reservaId: number,
   ): Promise<string | null> {
     const row = await this.controlRepository.findOne({
-      where: { reserva: { id: reservaId } },
+      where: { reserva: { id: reservaId }, estado: Not(EstadoControlPreEntrega.REVERTIDO) },
     });
     if (!row) {
       return 'Falta control de calidad pre-entrega aprobado';
@@ -93,20 +93,24 @@ export class ControlPreEntregaService {
     }
   }
 
-  async planillaPreparar(): Promise<PlanillaPrepararFilaDto[]> {
+  async planillaPreparar(
+    desdeParam?: string,
+    hastaParam?: string,
+  ): Promise<PlanillaPrepararFilaDto[]> {
     const hoy = DateUtils.getTodayDateOnly();
-    const hasta = DateUtils.formatDateOnly(
-      addDays(parseISO(`${hoy}T00:00:00`), 90),
-    );
+    const desde = desdeParam ?? hoy;
+    const hasta =
+      hastaParam ??
+      DateUtils.formatDateOnly(addDays(parseISO(`${hoy}T00:00:00`), 90));
 
     const qb = this.reservaRepository
       .createQueryBuilder('r')
       .innerJoinAndSelect('r.saco', 'saco')
       .leftJoinAndSelect('r.pantalon', 'pantalon')
-      .leftJoin(ControlPreEntrega, 'cpe', 'cpe.reserva_id = r.id')
+      .leftJoin(ControlPreEntrega, 'cpe', 'cpe.reserva_id = r.id AND cpe.estado != :revertido', { revertido: EstadoControlPreEntrega.REVERTIDO })
       .where('r.estadoReserva = :est', { est: EstadoReserva.CONFIRMADA })
       .andWhere('r.fechaReserva BETWEEN :desde AND :hasta', {
-        desde: hoy,
+        desde,
         hasta,
       })
       .andWhere('saco.ubicacionActual = :tienda', {
@@ -188,7 +192,7 @@ export class ControlPreEntregaService {
       }
 
       const existente = await manager.getRepository(ControlPreEntrega).findOne({
-        where: { reserva: { id: reserva.id } },
+        where: { reserva: { id: reserva.id }, estado: Not(EstadoControlPreEntrega.REVERTIDO) },
       });
       if (existente) {
         throw new BadRequestException(
