@@ -98,7 +98,7 @@ export class UserService {
       const existing = await this.userRepository.findOne({
         where: { userName: dto.userName },
       });
-      if (existing && existing.id !== id) {
+      if (existing && String(existing.id) !== String(id)) {
         throw new HttpException('El nombre de usuario ya está en uso', 400);
       }
       user.userName = dto.userName;
